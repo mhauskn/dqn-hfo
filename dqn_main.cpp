@@ -3,7 +3,6 @@
 #include <ale_interface.hpp>
 #include <glog/logging.h>
 #include <gflags/gflags.h>
-#include "prettyprint.hpp"
 #include "dqn.hpp"
 #include <boost/filesystem.hpp>
 #include <thread>
