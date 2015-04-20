@@ -13,23 +13,20 @@
 
 namespace dqn {
 
-constexpr auto kRawFrameHeight = 210;
-constexpr auto kRawFrameWidth = 160;
-constexpr auto kCroppedFrameSize = 84;
-constexpr auto kCroppedFrameDataSize = kCroppedFrameSize * kCroppedFrameSize;
-constexpr auto kInputFrameCount = 2;
-constexpr auto kInputDataSize = kCroppedFrameDataSize * kInputFrameCount;
+constexpr auto kStateDataSize = 58;
+constexpr auto kInputCount = 2;
+constexpr auto kInputDataSize = kStateDataSize * kInputCount;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kMinibatchDataSize = kInputDataSize * kMinibatchSize;
 constexpr auto kOutputCount = 5;
 
-using FrameData = std::array<uint8_t, kCroppedFrameDataSize>;
-using FrameDataSp = std::shared_ptr<FrameData>;
-using InputFrames = std::array<FrameDataSp, 4>;
-using Transition = std::tuple<InputFrames, int,
-                              float, boost::optional<FrameDataSp>>;
+using StateData = std::array<float, kStateDataSize>;
+using StateDataSp = std::shared_ptr<StateData>;
+using InputStates = std::array<StateDataSp, kInputCount>;
+using Transition = std::tuple<InputStates, int,
+                              float, boost::optional<StateDataSp>>;
 
-using FramesLayerInputData = std::array<float, kMinibatchDataSize>;
+using StateLayerInputData = std::array<float, kMinibatchDataSize>;
 using TargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 using FilterLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 
@@ -67,10 +64,10 @@ public:
   void Snapshot() { solver_->Snapshot(); }
 
   // Select an action by epsilon-greedy.
-  int SelectAction(const InputFrames& input_frames, double epsilon);
+  int SelectAction(const InputStates& input_states, double epsilon);
 
   // Select a batch of actions by epsilon-greedy.
-  std::vector<int> SelectActions(const std::vector<InputFrames>& frames_batch,
+  std::vector<int> SelectActions(const std::vector<InputStates>& states_batch,
                                  double epsilon);
 
   // Add a transition to replay memory
@@ -92,20 +89,20 @@ protected:
   // Clone the Primary network and store the result in clone_net_
   void ClonePrimaryNet();
 
-  // Given a set of input frames and a network, select an
+  // Given a set of input states and a network, select an
   // action. Returns the action and the estimated Q-Value.
   ActionValue SelectActionGreedily(caffe::Net<float>& net,
-                                   const InputFrames& last_frames);
+                                   const InputStates& last_states);
 
-  // Given a batch of input frames, return a batch of selected actions + values.
+  // Given a batch of input states, return a batch of selected actions + values.
   std::vector<ActionValue> SelectActionGreedily(
       caffe::Net<float>& net,
-      const std::vector<InputFrames>& last_frames);
+      const std::vector<InputStates>& last_states);
 
-  // Input data into the Frames/Target/Filter layers of the given
+  // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
-                           const FramesLayerInputData& frames_data,
+                           const StateLayerInputData& states_data,
                            const TargetLayerInputData& target_data,
                            const FilterLayerInputData& filter_data);
 

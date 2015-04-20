@@ -146,7 +146,7 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
 
 int main(int argc, char** argv) {
   std::string usage(argv[0]);
-  usage.append(" -rom rom -[evaluate|save path]");
+  usage.append(" -[evaluate|save path]");
   gflags::SetUsageMessage(usage);
   gflags::SetVersionString("0.1");
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -204,7 +204,8 @@ int main(int argc, char** argv) {
   hfo.connectToAgentServer(6008);
 
   // Get the vector of legal actions
-  const std::vector<int> legal_actions; // TODO
+  std::vector<int> legal_actions(dqn::kOutputCount);
+  std::iota(legal_actions.begin(), legal_actions.end(), 0);
 
   CHECK(FLAGS_snapshot.empty() || FLAGS_weights.empty())
       << "Give a snapshot to resume training or weights to finetune "

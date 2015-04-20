@@ -1,13 +1,13 @@
 layers {
-  name: "frames_input_layer"
+  name: "state_input_layer"
   type: MEMORY_DATA
-  top: "frames"
+  top: "state"
   top: "dummy1"
   memory_data_param {
     batch_size: 32
     channels: 2
-    height: 84
-    width: 84
+    height: 56
+    width: 1
   }
 }
 layers {
@@ -17,7 +17,7 @@ layers {
   top: "dummy2"
   memory_data_param {
     batch_size: 32
-    channels: 18
+    channels: 5
     height: 1
     width: 1
   }
@@ -29,7 +29,7 @@ layers {
   top: "dummy3"
   memory_data_param {
     batch_size: 32
-    channels: 18
+    channels: 5
     height: 1
     width: 1
   }
@@ -42,65 +42,9 @@ layers {
   bottom: "dummy3"
 }
 layers {
-  name: "conv1_layer"
-  type: CONVOLUTION
-  bottom: "frames"
-  top: "conv1"
-  blobs_lr: 1          # learning rate multiplier for the filters
-  blobs_lr: 2          # learning rate multiplier for the biases
-  weight_decay: 1      # weight decay multiplier for the filters
-  weight_decay: 0      # weight decay multiplier for the biases
-  convolution_param {
-    num_output: 16
-    kernel_size: 8
-    stride: 4
-    weight_filler {
-      type: "gaussian"
-      std: 0.01
-    }
-  }
-}
-layers {
-  name: "conv1_relu_layer"
-  type: RELU
-  bottom: "conv1"
-  top: "conv1"
-  relu_param {
-    negative_slope: 0.01
-  }
-}
-layers {
-  name: "conv2_layer"
-  type: CONVOLUTION
-  bottom: "conv1"
-  top: "conv2"
-  blobs_lr: 1          # learning rate multiplier for the filters
-  blobs_lr: 2          # learning rate multiplier for the biases
-  weight_decay: 1      # weight decay multiplier for the filters
-  weight_decay: 0      # weight decay multiplier for the biases
-  convolution_param {
-    num_output: 32
-    kernel_size: 4
-    stride: 2
-    weight_filler {
-      type: "gaussian"
-      std: 0.01
-    }
-  }
-}
-layers {
-  name: "conv2_relu_layer"
-  type: RELU
-  bottom: "conv2"
-  top: "conv2"
-  relu_param {
-    negative_slope: 0.01
-  }
-}
-layers {
   name: "ip1_layer"
   type: INNER_PRODUCT
-  bottom: "conv2"
+  bottom: "state"
   top: "ip1"
   inner_product_param {
     num_output: 256
