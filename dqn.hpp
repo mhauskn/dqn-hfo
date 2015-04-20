@@ -6,7 +6,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
-#include <ale_interface.hpp>
+#include <HFO.hpp>
 #include <caffe/caffe.hpp>
 #include <boost/functional/hash.hpp>
 #include <boost/optional.hpp>
@@ -26,14 +26,14 @@ constexpr auto kOutputCount = 18;
 using FrameData = std::array<uint8_t, kCroppedFrameDataSize>;
 using FrameDataSp = std::shared_ptr<FrameData>;
 using InputFrames = std::array<FrameDataSp, 4>;
-using Transition = std::tuple<InputFrames, Action,
+using Transition = std::tuple<InputFrames, int,
                               float, boost::optional<FrameDataSp>>;
 
 using FramesLayerInputData = std::array<float, kMinibatchDataSize>;
 using TargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 using FilterLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 
-using ActionValue = std::pair<Action, float>;
+using ActionValue = std::pair<int, float>;
 using SolverSp = std::shared_ptr<caffe::Solver<float>>;
 using NetSp = boost::shared_ptr<caffe::Net<float>>;
 
@@ -42,7 +42,7 @@ using NetSp = boost::shared_ptr<caffe::Net<float>>;
  */
 class DQN {
 public:
-  DQN(const ActionVect& legal_actions,
+  DQN(const std::vector<int>& legal_actions,
       const caffe::SolverParameter& solver_param,
       const int replay_memory_capacity,
       const double gamma,
@@ -67,11 +67,11 @@ public:
   void Snapshot() { solver_->Snapshot(); }
 
   // Select an action by epsilon-greedy.
-  Action SelectAction(const InputFrames& input_frames, double epsilon);
+  int SelectAction(const InputFrames& input_frames, double epsilon);
 
   // Select a batch of actions by epsilon-greedy.
-  ActionVect SelectActions(const std::vector<InputFrames>& frames_batch,
-                           double epsilon);
+  std::vector<int> SelectActions(const std::vector<InputFrames>& frames_batch,
+                                 double epsilon);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
@@ -110,7 +110,7 @@ protected:
                            const FilterLayerInputData& filter_data);
 
 protected:
-  const ActionVect legal_actions_;
+  const std::vector<int> legal_actions_;
   const caffe::SolverParameter solver_param_;
   const int replay_memory_capacity_;
   const double gamma_;
@@ -123,11 +123,6 @@ protected:
   std::mt19937 random_engine;
 };
 
-/**
- * Preprocess an ALE screen (downsampling & grayscaling)
- */
-FrameDataSp PreprocessScreen(const ALEScreen& raw_screen);
-
-}
+} // namespace dqn
 
 #endif /* DQN_HPP_ */
