@@ -41,6 +41,34 @@ double CalculateEpsilon(const int iter) {
 }
 
 /**
+ * Converts a discrete action into a continuous HFO-action
+ */
+Action GetAction(int action_idx) {
+  CHECK_LT(action_idx, dqn::kOutputCount);
+  Action a;
+  switch (action_idx) {
+    case 0: // NO_OP
+      a = {TURN, 0.};
+      break;
+    case 1: // Turn Left
+      a = {TURN, -5.};
+      break;
+    case 2: // Turn Right
+      a = {TURN, 5.};
+      break;
+    case 3: // Move forwards
+      a = {DASH, 100., 0.};
+      break;
+    case 4: // Kick forwards
+      a = {KICK, 100., 0.};
+      break;
+    default:
+      LOG(FATAL) << "Unknown action requested: " << action_idx;
+  }
+  return a;
+}
+
+/**
  * Play one episode and return the total score
  */
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
