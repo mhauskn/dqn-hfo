@@ -1,18 +1,19 @@
-layers {
+name: "Deep_Q-Network"
+layer {
   name: "state_input_layer"
-  type: MEMORY_DATA
-  top: "state"
+  type: "MemoryData"
+  top: "states"
   top: "dummy1"
   memory_data_param {
     batch_size: 32
     channels: 2
-    height: 56
+    height: 58
     width: 1
   }
 }
-layers {
+layer {
   name: "target_input_layer"
-  type: MEMORY_DATA
+  type: "MemoryData"
   top: "target"
   top: "dummy2"
   memory_data_param {
@@ -22,9 +23,9 @@ layers {
     width: 1
   }
 }
-layers {
+layer {
   name: "filter_input_layer"
-  type: MEMORY_DATA
+  type: "MemoryData"
   top: "filter"
   top: "dummy3"
   memory_data_param {
@@ -34,17 +35,29 @@ layers {
     width: 1
   }
 }
-layers {
+layer {
+  name: "filter_reshape"
+  type: "Reshape"
+  bottom: "filter"
+  top: "reshaped_filter"
+  reshape_param {
+    shape {
+      dim: 32
+      dim: 5
+    }
+  }
+}
+layer {
   name: "silence_layer"
-  type: SILENCE
+  type: "Silence"
   bottom: "dummy1"
   bottom: "dummy2"
   bottom: "dummy3"
 }
-layers {
+layer {
   name: "ip1_layer"
-  type: INNER_PRODUCT
-  bottom: "state"
+  type: "InnerProduct"
+  bottom: "states"
   top: "ip1"
   inner_product_param {
     num_output: 256
@@ -54,41 +67,41 @@ layers {
     }
   }
 }
-layers {
+layer {
   name: "ip1_relu_layer"
-  type: RELU
+  type: "ReLU"
   bottom: "ip1"
   top: "ip1"
   relu_param {
     negative_slope: 0.01
   }
 }
-layers {
+layer {
   name: "ip2_layer"
-  type: INNER_PRODUCT
+  type: "InnerProduct"
   bottom: "ip1"
   top: "q_values"
   inner_product_param {
-    num_output: 18
+    num_output: 5
     weight_filler {
       type: "gaussian"
       std: 0.01
     }
   }
 }
-layers {
+layer {
   name: "eltwise_layer"
-  type: ELTWISE
+  type: "Eltwise"
   bottom: "q_values"
-  bottom: "filter"
+  bottom: "reshaped_filter"
   top: "filtered_q_values"
   eltwise_param {
     operation: PROD
   }
 }
-layers {
+layer {
   name: "loss"
-  type: EUCLIDEAN_LOSS
+  type: "EuclideanLoss"
   bottom: "filtered_q_values"
   bottom: "target"
   top: "loss"

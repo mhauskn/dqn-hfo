@@ -10,16 +10,15 @@
 namespace dqn {
 
 template <typename Dtype>
-bool HasBlobSize(
-    const caffe::Blob<Dtype>& blob,
-    const int num,
-    const int channels,
-    const int height,
-    const int width) {
-  return blob.num() == num &&
-      blob.channels() == channels &&
-      blob.height() == height &&
-      blob.width() == width;
+void HasBlobSize(caffe::Net<Dtype>& net,
+                 const std::string& blob_name,
+                 const std::vector<int> expected_shape) {
+  net.has_blob(blob_name);
+  const caffe::Blob<Dtype>& blob = *net.blob_by_name(blob_name);
+  const std::vector<int>& blob_shape = blob.shape();
+  CHECK_EQ(blob_shape.size(), expected_shape.size());
+  CHECK(std::equal(blob_shape.begin(), blob_shape.end(),
+                   expected_shape.begin()));
 }
 
 void DQN::LoadTrainedModel(const std::string& model_bin) {
@@ -33,15 +32,11 @@ void DQN::RestoreSolver(const std::string& solver_bin) {
 void DQN::Initialize() {
   // Initialize net and solver
   solver_.reset(caffe::GetSolver<float>(solver_param_));
-  solver_->PreSolve();
   net_ = solver_->net();
   std::fill(dummy_input_data_.begin(), dummy_input_data_.end(), 0.0);
-  assert(HasBlobSize(*net_->blob_by_name("states"), kMinibatchSize,
-                     kInputCount, kStateDataSize, 1));
-  assert(HasBlobSize(*net_->blob_by_name("target"), kMinibatchSize,
-                     kOutputCount, 1, 1));
-  assert(HasBlobSize(*net_->blob_by_name("filter"), kMinibatchSize,
-                     kOutputCount, 1, 1));
+  HasBlobSize(*net_, "states", {kMinibatchSize,kInputCount,kStateDataSize,1});
+  HasBlobSize(*net_, "target", {kMinibatchSize,kOutputCount,1,1});
+  HasBlobSize(*net_, "filter", {kMinibatchSize,kOutputCount,1,1});
   ClonePrimaryNet();
 }
 
