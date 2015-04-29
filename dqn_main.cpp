@@ -74,19 +74,19 @@ Action GetAction(int action_idx) {
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
   std::deque<dqn::StateDataSp> past_states;
+  double total_score;
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
-    const auto current_state = hfo.getState();
-    dqn::StateData current_state_;
-    std::copy(current_state.begin(), current_state.begin() + dqn::kStateDataSize,
-              current_state_.begin());
-    dqn::StateDataSp current_state_sp =
-        std::make_shared<dqn::StateData>(current_state_);
+    const std::vector<float>& current_state = hfo.getState();
+    CHECK_EQ(current_state.size(),dqn::kStateDataSize);
+    dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
+    std::copy(current_state.begin(), current_state.begin()
+              + dqn::kStateDataSize, current_state_sp->begin());
     past_states.push_back(current_state_sp);
-    if (past_states.size() <= dqn::kInputCount) {
+    if (past_states.size() < dqn::kInputCount) {
       // If there are not past states enough for DQN input, just select DASH
       Action a;
-      a = {DASH, 100., 0.};
+      a = {DASH, 0., 0.};
       status = hfo.act(a);
     } else {
       while (past_states.size() > dqn::kInputCount) {
@@ -98,9 +98,9 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       Action action = GetAction(action_idx);
       status = hfo.act(action);
       // Rewards for DQN are normalized as follows:
-      // 1 for scoring any goal, -1 for captured by defense, out of bounds, out of time
+      // 1 for scoring a goal, -1 for captured by defense, out of bounds, out of time
       // 0 for other middle states
-      auto reward = 0;
+      float reward = 0;
       if (status == GOAL) {
         reward = 1;
       }
@@ -108,16 +108,17 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                status == OUT_OF_TIME) {
         reward = -1;
       }
+      total_score = reward;
       if (update) {
         // Add the current transition to replay memory
-        const auto next_state = hfo.getState();
-        dqn::StateData next_state_;
+        const std::vector<float>& next_state = hfo.getState();
+        CHECK_EQ(next_state.size(),dqn::kStateDataSize);
+        dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
         std::copy(next_state.begin(), next_state.begin()
-                  + dqn::kStateDataSize, next_state_.begin());
-        dqn::StateDataSp next_state_sp =
-            std::make_shared<dqn::StateData>(next_state_);
-        const auto transition =
-            dqn::Transition(input_states, action_idx, reward, next_state_sp);
+                  + dqn::kStateDataSize, next_state_sp->begin());
+        const auto transition = (status == IN_GAME) ?
+            dqn::Transition(input_states, action_idx, reward, next_state_sp):
+            dqn::Transition(input_states, action_idx, reward, boost::none);
         dqn.AddTransition(transition);
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
@@ -126,7 +127,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       }
     }
   }
-  return 0;
+  return total_score;
 }
 
 /**
