@@ -80,8 +80,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
     const std::vector<float>& current_state = hfo.getState();
     CHECK_EQ(current_state.size(),dqn::kStateDataSize);
     dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
-    std::copy(current_state.begin(), current_state.end()
-              + dqn::kStateDataSize, current_state_sp->begin());
+    std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kInputCount) {
       // If there are not past states enough for DQN input, just select DASH
@@ -113,8 +112,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         const std::vector<float>& next_state = hfo.getState();
         CHECK_EQ(next_state.size(),dqn::kStateDataSize);
         dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
-        std::copy(next_state.begin(), next_state.end()
-                  + dqn::kStateDataSize, next_state_sp->begin());
+        std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?
             dqn::Transition(input_states, action_idx, reward, next_state_sp):
             dqn::Transition(input_states, action_idx, reward, boost::none);
