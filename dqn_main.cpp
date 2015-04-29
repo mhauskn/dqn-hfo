@@ -80,7 +80,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
     const std::vector<float>& current_state = hfo.getState();
     CHECK_EQ(current_state.size(),dqn::kStateDataSize);
     dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
-    std::copy(current_state.begin(), current_state.begin()
+    std::copy(current_state.begin(), current_state.end()
               + dqn::kStateDataSize, current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kInputCount) {
@@ -103,8 +103,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       float reward = 0;
       if (status == GOAL) {
         reward = 1;
-      }
-      else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
+      } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
                status == OUT_OF_TIME) {
         reward = -1;
       }
@@ -114,7 +113,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         const std::vector<float>& next_state = hfo.getState();
         CHECK_EQ(next_state.size(),dqn::kStateDataSize);
         dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
-        std::copy(next_state.begin(), next_state.begin()
+        std::copy(next_state.begin(), next_state.end()
                   + dqn::kStateDataSize, next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?
             dqn::Transition(input_states, action_idx, reward, next_state_sp):
