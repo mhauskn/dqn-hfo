@@ -73,52 +73,58 @@ Action GetAction(int action_idx) {
  */
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
-  // CHECK(!ale.game_over());
-  // std::deque<dqn::FrameDataSp> past_frames;
-  // auto total_score = 0.0;
-  // for (auto frame = 0; !ale.game_over(); ++frame) {
-  //   const ALEScreen& screen = ale.getScreen();
-  //   const auto current_frame = dqn::PreprocessScreen(screen);
-  //   past_frames.push_back(current_frame);
-  //   if (past_frames.size() < dqn::kInputFrameCount) {
-  //     // If there are not past frames enough for DQN input, just select NOOP
-  //     for (auto i = 0; i < FLAGS_skip_frame + 1 && !ale.game_over(); ++i) {
-  //       total_score += ale.act(PLAYER_A_NOOP);
-  //     }
-  //   } else {
-  //     while (past_frames.size() > dqn::kInputFrameCount) {
-  //       past_frames.pop_front();
-  //     }
-  //     dqn::InputFrames input_frames;
-  //     std::copy(past_frames.begin(), past_frames.end(), input_frames.begin());
-  //     const auto action = dqn.SelectAction(input_frames, epsilon);
-  //     auto immediate_score = 0.0;
-  //     for (auto i = 0; i < FLAGS_skip_frame + 1 && !ale.game_over(); ++i) {
-  //       immediate_score += ale.act(action);
-  //     }
-  //     total_score += immediate_score;
-  //     // Rewards for DQN are normalized as follows:
-  //     // 1 for any positive score, -1 for any negative score, otherwise 0
-  //     const auto reward = immediate_score == 0 ? 0 : immediate_score /
-  //         std::abs(immediate_score);
-  //     assert(reward <= 1 && reward >= -1);
-  //     if (update) {
-  //       // Add the current transition to replay memory
-  //       const auto transition = ale.game_over() ?
-  //           dqn::Transition(input_frames, action, reward, boost::none) :
-  //           dqn::Transition(input_frames, action, reward,
-  //                           dqn::PreprocessScreen(ale.getScreen()));
-  //       dqn.AddTransition(transition);
-  //       // If the size of replay memory is large enough, update DQN
-  //       if (dqn.memory_size() > FLAGS_memory_threshold) {
-  //         dqn.Update();
-  //       }
-  //     }
-  //   }
-  // }
-  // ale.reset_game();
-  // return total_score;
-  return 0;
+  std::deque<dqn::StateDataSp> past_states;
+  double total_score;
+  hfo_status_t status = IN_GAME;
+  while (status == IN_GAME) {
+    const std::vector<float>& current_state = hfo.getState();
+    CHECK_EQ(current_state.size(),dqn::kStateDataSize);
+    dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
+    std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
+    past_states.push_back(current_state_sp);
+    if (past_states.size() < dqn::kInputCount) {
+      // If there are not past states enough for DQN input, just select DASH
+      Action a;
+      a = {DASH, 0., 0.};
+      status = hfo.act(a);
+    } else {
+      while (past_states.size() > dqn::kInputCount) {
+        past_states.pop_front();
+      }
+      dqn::InputStates input_states;
+      std::copy(past_states.begin(), past_states.end(), input_states.begin());
+      const auto action_idx = dqn.SelectAction(input_states, epsilon);
+      Action action = GetAction(action_idx);
+      status = hfo.act(action);
+      // Rewards for DQN are normalized as follows:
+      // 1 for scoring a goal, -1 for captured by defense, out of bounds, out of time
+      // 0 for other middle states
+      float reward = 0;
+      if (status == GOAL) {
+        reward = 1;
+      } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
+               status == OUT_OF_TIME) {
+        reward = -1;
+      }
+      total_score = reward;
+      if (update) {
+        // Add the current transition to replay memory
+        const std::vector<float>& next_state = hfo.getState();
+        CHECK_EQ(next_state.size(),dqn::kStateDataSize);
+        dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
+        std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
+        const auto transition = (status == IN_GAME) ?
+            dqn::Transition(input_states, action_idx, reward, next_state_sp):
+            dqn::Transition(input_states, action_idx, reward, boost::none);
+        dqn.AddTransition(transition);
+        // If the size of replay memory is large enough, update DQN
+        if (dqn.memory_size() > FLAGS_memory_threshold) {
+          dqn.Update();
+        }
+      }
+    }
+  }
+  return total_score;
 }
 
 /**
