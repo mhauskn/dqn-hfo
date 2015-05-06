@@ -196,7 +196,7 @@ void DQN::InputDataIntoLayers(caffe::Net<float>& net,
   // Get the layers by name and cast them to memory layers
   const auto states_input_layer =
       boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
-          net.layer_by_name("states_input_layer"));
+          net.layer_by_name("state_input_layer"));
   const auto target_input_layer =
       boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
           net.layer_by_name("target_input_layer"));
