@@ -18,7 +18,7 @@ constexpr auto kInputCount = 2;
 constexpr auto kInputDataSize = kStateDataSize * kInputCount;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kMinibatchDataSize = kInputDataSize * kMinibatchSize;
-constexpr auto kOutputCount = 5;
+constexpr auto kOutputCount = 9;
 
 using StateData = std::array<float, kStateDataSize>;
 using StateDataSp = std::shared_ptr<StateData>;

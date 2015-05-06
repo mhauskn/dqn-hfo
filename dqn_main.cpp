@@ -47,20 +47,32 @@ Action GetAction(int action_idx) {
   CHECK_LT(action_idx, dqn::kOutputCount);
   Action a;
   switch (action_idx) {
-    case 0: // NO_OP
-      a = {TURN, 0.};
-      break;
-    case 1: // Turn Left
-      a = {TURN, -5.};
-      break;
-    case 2: // Turn Right
-      a = {TURN, 5.};
-      break;
-    case 3: // Move forwards
-      a = {DASH, 100., 0.};
-      break;
-    case 4: // Kick forwards
+    case 0:
       a = {KICK, 100., 0.};
+      break;
+    case 1:
+      a = {KICK, 100., -10.};
+      break;
+    case 2:
+      a = {KICK, 100., 10.};
+      break;
+    case 3:
+      a = {KICK, 100., -20.};
+      break;
+    case 4:
+      a = {KICK, 100., 20.};
+      break;
+    case 5:
+      a = {KICK, 100., -30.};
+      break;
+    case 6:
+      a = {KICK, 100., 30.};
+      break;
+    case 7:
+      a = {KICK, 100., -45.};
+      break;
+    case 8:
+      a = {KICK, 100., 45.};
       break;
     default:
       LOG(FATAL) << "Unknown action requested: " << action_idx;
