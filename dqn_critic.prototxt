@@ -1,0 +1,73 @@
+name: "Deep_Q-Network"
+layer {
+  name: "state_input_layer"
+  type: "MemoryData"
+  top: "states"
+  top: "dummy1"
+  memory_data_param {
+    batch_size: 32
+    channels: 2
+    height: 59
+    width: 1
+  }
+}
+layer {
+  name: "target_input_layer"
+  type: "MemoryData"
+  top: "target"
+  top: "dummy2"
+  memory_data_param {
+    batch_size: 32
+    channels: 1
+    height: 1
+    width: 1
+  }
+}
+layer {
+  name: "silence_layer"
+  type: "Silence"
+  bottom: "dummy1"
+  bottom: "dummy2"
+}
+layer {
+  name: "ip1_layer"
+  type: "InnerProduct"
+  bottom: "states"
+  top: "ip1"
+  inner_product_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "ip1_relu_layer"
+  type: "ReLU"
+  bottom: "ip1"
+  top: "ip1"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "ip2_layer"
+  type: "InnerProduct"
+  bottom: "ip1"
+  top: "q_values"
+  inner_product_param {
+    num_output: 1
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "loss"
+  type: "EuclideanLoss"
+  bottom: "q_values"
+  bottom: "target"
+  top: "loss"
+}
