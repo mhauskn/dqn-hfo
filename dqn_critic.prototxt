@@ -1,4 +1,4 @@
-name: "Deep_Q-Network"
+name: "DQN-Critic-Network"
 layer {
   name: "state_input_layer"
   type: "MemoryData"
