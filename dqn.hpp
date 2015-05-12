@@ -13,22 +13,35 @@
 
 namespace dqn {
 
-constexpr auto kStateDataSize = 58;
-constexpr auto kInputCount = 2;
-constexpr auto kInputDataSize = kStateDataSize * kInputCount;
+constexpr auto kInputFrameCount = 2;
 constexpr auto kMinibatchSize = 32;
-constexpr auto kMinibatchDataSize = kInputDataSize * kMinibatchSize;
-constexpr auto kOutputCount = 9;
 
-using StateData = std::array<float, kStateDataSize>;
-using StateDataSp = std::shared_ptr<StateData>;
-using InputStates = std::array<StateDataSp, kInputCount>;
-using Transition = std::tuple<InputStates, int,
-                              float, boost::optional<StateDataSp>>;
+constexpr auto kActorStateDataSize = 58;
+constexpr auto kActorInputDataSize = kActorStateDataSize * kInputFrameCount;
+constexpr auto kActorMinibatchDataSize = kActorInputDataSize * kMinibatchSize;
+constexpr auto kActorOutputCount = 1;
 
-using StateLayerInputData = std::array<float, kMinibatchDataSize>;
-using TargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
-using FilterLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
+using ActorStateData = std::array<float, kActorStateDataSize>;
+using ActorStateDataSp = std::shared_ptr<ActorStateData>;
+using ActorInputStates = std::array<ActorStateDataSp, kInputFrameCount>;
+using Transition = std::tuple<ActorInputStates, int,
+                              float, boost::optional<ActorStateDataSp>>;
+
+using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
+using TargetLayerInputData = std::array<float, kMinibatchSize * kActorOutputCount>;
+using FilterLayerInputData = std::array<float, kMinibatchSize * kActorOutputCount>;
+
+constexpr auto kCriticStateDataSize = kActorStateDataSize + 1;
+constexpr auto kCriticInputDataSize = kCriticStateDataSize * kInputFrameCount;
+constexpr auto kCriticMinibatchDataSize = kCriticInputDataSize * kMinibatchSize;
+constexpr auto kCriticOutputCount = 1;
+
+using CriticStateData = std::array<float, kCriticInputDataSize>;
+using CriticStateDataSp = std::shared_ptr<CriticStateData>;
+using CriticInputStates = std::array<CriticStateDataSp, kInputFrameCount>;
+
+using CriticStateLayerInputData = std::array<float, kCriticMinibatchDataSize>;
+using CriticTargetLayerInputData = std::array<float, kMinibatchSize * kCriticOutputCount>;
 
 using ActionValue = std::pair<int, float>;
 using SolverSp = std::shared_ptr<caffe::Solver<float>>;
@@ -40,12 +53,14 @@ using NetSp = boost::shared_ptr<caffe::Net<float>>;
 class DQN {
 public:
   DQN(const std::vector<int>& legal_actions,
-      const caffe::SolverParameter& solver_param,
+      const caffe::SolverParameter& solver_actor_param,
+      const caffe::SolverParameter& solver_critic_param,
       const int replay_memory_capacity,
       const double gamma,
       const int clone_frequency) :
         legal_actions_(legal_actions),
-        solver_param_(solver_param),
+        solver_actor_param_(solver_actor_param),
+        solver_critic_param_(solver_critic_param),
         replay_memory_capacity_(replay_memory_capacity),
         gamma_(gamma),
         clone_frequency_(clone_frequency),
@@ -58,16 +73,16 @@ public:
   void LoadTrainedModel(const std::string& model_file);
 
   // Restore solving from a solver file.
-  void RestoreSolver(const std::string& solver_file);
+  void RestoreSolver(const std::string& solver_actor_file);
 
   // Snapshot the current model
-  void Snapshot() { solver_->Snapshot(); }
+  void Snapshot() { solver_actor_->Snapshot(); }
 
   // Select an action by epsilon-greedy.
-  int SelectAction(const InputStates& input_states, double epsilon);
+  int SelectAction(const ActorInputStates& input_states, double epsilon);
 
   // Select a batch of actions by epsilon-greedy.
-  std::vector<int> SelectActions(const std::vector<InputStates>& states_batch,
+  std::vector<int> SelectActions(const std::vector<ActorInputStates>& states_batch,
                                  double epsilon);
 
   // Add a transition to replay memory
@@ -83,7 +98,7 @@ public:
   int memory_size() const { return replay_memory_.size(); }
 
   // Return the current iteration of the solver
-  int current_iteration() const { return solver_->iter(); }
+  int current_iteration() const { return solver_actor_->iter(); }
 
 protected:
   // Clone the Primary network and store the result in clone_net_
@@ -92,12 +107,12 @@ protected:
   // Given a set of input states and a network, select an
   // action. Returns the action and the estimated Q-Value.
   ActionValue SelectActionGreedily(caffe::Net<float>& net,
-                                   const InputStates& last_states);
+                                   const ActorInputStates& last_states);
 
   // Given a batch of input states, return a batch of selected actions + values.
   std::vector<ActionValue> SelectActionGreedily(
       caffe::Net<float>& net,
-      const std::vector<InputStates>& last_states);
+      const std::vector<ActorInputStates>& last_states);
 
   // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
@@ -108,13 +123,16 @@ protected:
 
 protected:
   const std::vector<int> legal_actions_;
-  const caffe::SolverParameter solver_param_;
+  const caffe::SolverParameter solver_actor_param_;
+  const caffe::SolverParameter solver_critic_param_;
   const int replay_memory_capacity_;
   const double gamma_;
   const int clone_frequency_; // How often (steps) the clone_net is updated
   std::deque<Transition> replay_memory_;
-  SolverSp solver_;
-  NetSp net_; // The primary network used for action selection.
+  SolverSp solver_actor_;
+  NetSp net_actor_; // The actor network used for continuous action evaluation.
+  SolverSp solver_critic_;
+  NetSp net_critic_;  // The critic network used for giving q-value of a continuous action;
   NetSp clone_net_; // Clone of primary net. Used to generate targets.
   TargetLayerInputData dummy_input_data_;
   std::mt19937 random_engine;

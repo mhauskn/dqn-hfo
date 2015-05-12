@@ -30,7 +30,8 @@ DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates")
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
-DEFINE_string(solver, "dqn_solver.prototxt", "Solver parameter file (*.prototxt)");
+DEFINE_string(solver_actor, "dqn_acotr_solver.prototxt", "Actor solver parameter file (*.prototxt)");
+DEFINE_string(solver_critic, "dqn_critic_solver.prototxt", "Critic solver parameter file (*.prototxt)");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -42,41 +43,12 @@ double CalculateEpsilon(const int iter) {
 
 /**
  * Converts a discrete action into a continuous HFO-action
- */
-Action GetAction(int action_idx) {
-  CHECK_LT(action_idx, dqn::kOutputCount);
+ x*/
+Action GetAction(int kickangle) {
+  CHECK_LT(kickangle, 90);
+  CHECK_GT(kickangle, -90);
   Action a;
-  switch (action_idx) {
-    case 0:
-      a = {KICK, 100., 0.};
-      break;
-    case 1:
-      a = {KICK, 100., -10.};
-      break;
-    case 2:
-      a = {KICK, 100., 10.};
-      break;
-    case 3:
-      a = {KICK, 100., -20.};
-      break;
-    case 4:
-      a = {KICK, 100., 20.};
-      break;
-    case 5:
-      a = {KICK, 100., -30.};
-      break;
-    case 6:
-      a = {KICK, 100., 30.};
-      break;
-    case 7:
-      a = {KICK, 100., -45.};
-      break;
-    case 8:
-      a = {KICK, 100., 45.};
-      break;
-    default:
-      LOG(FATAL) << "Unknown action requested: " << action_idx;
-  }
+  a = {KICK, 100., (float)kickangle};
   return a;
 }
 
@@ -85,28 +57,28 @@ Action GetAction(int action_idx) {
  */
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
-  std::deque<dqn::StateDataSp> past_states;
+  std::deque<dqn::ActorStateDataSp> past_states;
   double total_score;
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
     const std::vector<float>& current_state = hfo.getState();
-    CHECK_EQ(current_state.size(),dqn::kStateDataSize);
-    dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
+    CHECK_EQ(current_state.size(),dqn::kActorStateDataSize);
+    dqn::ActorStateDataSp current_state_sp = std::make_shared<dqn::ActorStateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
-    if (past_states.size() < dqn::kInputCount) {
+    if (past_states.size() < dqn::kInputFrameCount) {
       // If there are not past states enough for DQN input, just select DASH
       Action a;
       a = {DASH, 0., 0.};
       status = hfo.act(a);
     } else {
-      while (past_states.size() > dqn::kInputCount) {
+      while (past_states.size() > dqn::kInputFrameCount) {
         past_states.pop_front();
       }
-      dqn::InputStates input_states;
+      dqn::ActorInputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
-      const auto action_idx = dqn.SelectAction(input_states, epsilon);
-      Action action = GetAction(action_idx);
+      const auto kickangle = dqn.SelectAction(input_states, epsilon);
+      Action action = GetAction(kickangle);
       status = hfo.act(action);
       // Rewards for DQN are normalized as follows:
       // 1 for scoring a goal, -1 for captured by defense, out of bounds, out of time
@@ -122,12 +94,12 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       if (update) {
         // Add the current transition to replay memory
         const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(),dqn::kStateDataSize);
-        dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
+        CHECK_EQ(next_state.size(),dqn::kActorStateDataSize);
+        dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?
-            dqn::Transition(input_states, action_idx, reward, next_state_sp):
-            dqn::Transition(input_states, action_idx, reward, boost::none);
+            dqn::Transition(input_states, kickangle, reward, next_state_sp):
+            dqn::Transition(input_states, kickangle, reward, boost::none);
         dqn.AddTransition(transition);
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
@@ -172,8 +144,8 @@ int main(int argc, char** argv) {
   google::InstallFailureSignalHandler();
   // google::LogToStderr();
 
-  if (!is_regular_file(FLAGS_solver)) {
-    LOG(ERROR) << "Invalid solver: " << FLAGS_solver;
+  if (!is_regular_file(FLAGS_solver_actor)) {
+    LOG(ERROR) << "Invalid solver: " << FLAGS_solver_actor;
     exit(1);
   }
   if (FLAGS_save.empty() && !FLAGS_evaluate) {
@@ -222,7 +194,7 @@ int main(int argc, char** argv) {
   hfo.connectToAgentServer(6008);
 
   // Get the vector of legal actions
-  std::vector<int> legal_actions(dqn::kOutputCount);
+  std::vector<int> legal_actions(dqn::kActorOutputCount);
   std::iota(legal_actions.begin(), legal_actions.end(), 0);
 
   CHECK(FLAGS_snapshot.empty() || FLAGS_weights.empty())
@@ -230,12 +202,15 @@ int main(int argc, char** argv) {
       "but not both.";
 
   // Construct the solver
-  caffe::SolverParameter solver_param;
-  caffe::ReadProtoFromTextFileOrDie(FLAGS_solver, &solver_param);
-  solver_param.set_snapshot_prefix(save_path.c_str());
+  caffe::SolverParameter solver_actor_param;
+  caffe::SolverParameter solver_critic_param;
+  caffe::ReadProtoFromTextFileOrDie(FLAGS_solver_actor, &solver_actor_param);
+  caffe::ReadProtoFromTextFileOrDie(FLAGS_solver_critic, &solver_critic_param);
+  solver_actor_param.set_snapshot_prefix(save_path.c_str());
+  solver_critic_param.set_snapshot_prefix(save_path.c_str());
 
-  dqn::DQN dqn(legal_actions, solver_param, FLAGS_memory, FLAGS_gamma,
-               FLAGS_clone_freq);
+  dqn::DQN dqn(legal_actions, solver_actor_param, solver_critic_param,
+               FLAGS_memory, FLAGS_gamma, FLAGS_clone_freq);
   dqn.Initialize();
 
   if (!FLAGS_snapshot.empty()) {
@@ -259,7 +234,7 @@ int main(int argc, char** argv) {
   int last_eval_iter = 0;
   int episode = 0;
   double best_score = std::numeric_limits<double>::min();
-  while (dqn.current_iteration() < solver_param.max_iter()) {
+  while (dqn.current_iteration() < solver_actor_param.max_iter()) {
     double epsilon = CalculateEpsilon(dqn.current_iteration());
     double score = PlayOneEpisode(hfo, dqn, epsilon, true);
     LOG(INFO) << "Episode " << episode << " score = " << score

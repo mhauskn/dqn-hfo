@@ -1,0 +1,10 @@
+net: "dqn_critic.prototxt"
+solver_type: ADADELTA
+momentum: 0.95
+base_lr: 0.1
+lr_policy: "step"
+gamma: 0.1
+stepsize: 10000000
+max_iter: 50000000
+display: 10000
+snapshot: 1000000
