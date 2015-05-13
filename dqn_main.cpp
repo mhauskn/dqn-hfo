@@ -24,14 +24,16 @@ DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network.");
 DEFINE_int32(memory_threshold, 50000, "Number of transitions to start learning");
 DEFINE_int32(skip_frame, 3, "Number of frames skipped");
-DEFINE_string(weights, "", "The pretrained weights load (*.caffemodel).");
-DEFINE_string(snapshot, "", "The solver state to load (*.solverstate).");
+DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemodel).");
+DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
+DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
+DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solverstate).");
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
-DEFINE_string(solver_actor, "dqn_acotr_solver.prototxt", "Actor solver parameter file (*.prototxt)");
-DEFINE_string(solver_critic, "dqn_critic_solver.prototxt", "Critic solver parameter file (*.prototxt)");
+DEFINE_string(actor_solver, "dqn_actor_solver.prototxt", "Actor solver parameter file (*.prototxt)");
+DEFINE_string(critic_solver, "dqn_critic_solver.prototxt", "Critic solver parameter file (*.prototxt)");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -44,11 +46,11 @@ double CalculateEpsilon(const int iter) {
 /**
  * Converts a discrete action into a continuous HFO-action
  x*/
-Action GetAction(int kickangle) {
+Action GetAction(float kickangle) {
   CHECK_LT(kickangle, 90);
   CHECK_GT(kickangle, -90);
   Action a;
-  a = {KICK, 100., (float)kickangle};
+  a = {KICK, 100., kickangle};
   return a;
 }
 
@@ -144,8 +146,8 @@ int main(int argc, char** argv) {
   google::InstallFailureSignalHandler();
   // google::LogToStderr();
 
-  if (!is_regular_file(FLAGS_solver_actor)) {
-    LOG(ERROR) << "Invalid solver: " << FLAGS_solver_actor;
+  if (!is_regular_file(FLAGS_actor_solver)) {
+    LOG(ERROR) << "Invalid solver: " << FLAGS_actor_solver;
     exit(1);
   }
   if (FLAGS_save.empty() && !FLAGS_evaluate) {
@@ -194,31 +196,34 @@ int main(int argc, char** argv) {
   hfo.connectToAgentServer(6008);
 
   // Get the vector of legal actions
-  std::vector<int> legal_actions(dqn::kActorOutputCount);
+  std::vector<int> legal_actions(dqn::kOutputCount);
   std::iota(legal_actions.begin(), legal_actions.end(), 0);
 
-  CHECK(FLAGS_snapshot.empty() || FLAGS_weights.empty())
+  CHECK(FLAGS_critic_snapshot.empty() || FLAGS_actor_snapshot.empty()
+        || FLAGS_actor_weights.empty() || FLAGS_critic_weights.empty())
       << "Give a snapshot to resume training or weights to finetune "
       "but not both.";
 
   // Construct the solver
-  caffe::SolverParameter solver_actor_param;
-  caffe::SolverParameter solver_critic_param;
-  caffe::ReadProtoFromTextFileOrDie(FLAGS_solver_actor, &solver_actor_param);
-  caffe::ReadProtoFromTextFileOrDie(FLAGS_solver_critic, &solver_critic_param);
-  solver_actor_param.set_snapshot_prefix(save_path.c_str());
-  solver_critic_param.set_snapshot_prefix(save_path.c_str());
+  caffe::SolverParameter actor_solver_param;
+  caffe::SolverParameter critic_solver_param;
+  caffe::ReadProtoFromTextFileOrDie(FLAGS_actor_solver, &actor_solver_param);
+  caffe::ReadProtoFromTextFileOrDie(FLAGS_critic_solver, &critic_solver_param);
+  actor_solver_param.set_snapshot_prefix(save_path.c_str());
+  critic_solver_param.set_snapshot_prefix(save_path.c_str());
 
-  dqn::DQN dqn(legal_actions, solver_actor_param, solver_critic_param,
+  dqn::DQN dqn(legal_actions, actor_solver_param, critic_solver_param,
                FLAGS_memory, FLAGS_gamma, FLAGS_clone_freq);
   dqn.Initialize();
 
-  if (!FLAGS_snapshot.empty()) {
-    LOG(INFO) << "Resuming from " << FLAGS_snapshot;
-    dqn.RestoreSolver(FLAGS_snapshot);
-  } else if (!FLAGS_weights.empty()) {
-    LOG(INFO) << "Finetuning from " << FLAGS_weights;
-    dqn.LoadTrainedModel(FLAGS_weights);
+  if (!FLAGS_critic_snapshot.empty() && !FLAGS_actor_snapshot.empty()) {
+    LOG(INFO) << "Actor solver state resuming from " << FLAGS_actor_snapshot;
+    LOG(INFO) << "Critic solver state resuming from " << FLAGS_critic_snapshot;
+    dqn.RestoreSolver(FLAGS_actor_snapshot, FLAGS_critic_snapshot);
+  } else if (!FLAGS_critic_weights.empty() || !FLAGS_actor_weights.empty()) {
+    LOG(INFO) << "Actor weights finetuning from " << FLAGS_actor_weights;
+    LOG(INFO) << "Critic weights finetuning from " << FLAGS_critic_weights;
+    dqn.LoadTrainedModel(FLAGS_actor_weights, FLAGS_critic_weights);
   }
 
   if (FLAGS_evaluate) {
@@ -234,7 +239,7 @@ int main(int argc, char** argv) {
   int last_eval_iter = 0;
   int episode = 0;
   double best_score = std::numeric_limits<double>::min();
-  while (dqn.current_iteration() < solver_actor_param.max_iter()) {
+  while (dqn.current_iteration() < actor_solver_param.max_iter()) {
     double epsilon = CalculateEpsilon(dqn.current_iteration());
     double score = PlayOneEpisode(hfo, dqn, epsilon, true);
     LOG(INFO) << "Episode " << episode << " score = " << score
