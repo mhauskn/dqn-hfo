@@ -13,7 +13,7 @@ template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
                  const std::string& blob_name,
                  const std::vector<int> expected_shape) {
-  net.has_blob(blob_name);
+  CHECK(net.has_blob(blob_name)) << "Net does not have blob named " << blob_name;
   const caffe::Blob<Dtype>& blob = *net.blob_by_name(blob_name);
   const std::vector<int>& blob_shape = blob.shape();
   CHECK_EQ(blob_shape.size(), expected_shape.size());
@@ -21,30 +21,39 @@ void HasBlobSize(caffe::Net<Dtype>& net,
                    expected_shape.begin()));
 }
 
-void DQN::LoadTrainedModel(const std::string& model_bin) {
-  net_->CopyTrainedLayersFrom(model_bin);
+void DQN::LoadTrainedModel(const std::string& actor_model_bin,
+                           const std::string& critic_model_bin) {
+  actor_net_->CopyTrainedLayersFrom(actor_model_bin);
+  critic_net_->CopyTrainedLayersFrom(critic_model_bin);
 }
 
-void DQN::RestoreSolver(const std::string& solver_bin) {
-  solver_->Restore(solver_bin.c_str());
+void DQN::RestoreSolver(const std::string& actor_solver_bin,
+                        const std::string& critic_solver_bin) {
+  actor_solver_->Restore(actor_solver_bin.c_str());
+  critic_solver_->Restore(critic_solver_bin.c_str());
 }
 
 void DQN::Initialize() {
   // Initialize net and solver
-  solver_.reset(caffe::GetSolver<float>(solver_param_));
-  net_ = solver_->net();
+  actor_solver_.reset(caffe::GetSolver<float>(actor_solver_param_));
+  critic_solver_.reset(caffe::GetSolver<float>(critic_solver_param_));
+  actor_net_ = actor_solver_->net();
+  critic_net_ = critic_solver_->net();
   std::fill(dummy_input_data_.begin(), dummy_input_data_.end(), 0.0);
-  HasBlobSize(*net_, "states", {kMinibatchSize,kInputCount,kStateDataSize,1});
-  HasBlobSize(*net_, "target", {kMinibatchSize,kOutputCount,1,1});
-  HasBlobSize(*net_, "filter", {kMinibatchSize,kOutputCount,1,1});
+  HasBlobSize(*actor_net_, "states",
+              {kMinibatchSize,kStateInputCount,kActorStateDataSize,1});
+  HasBlobSize(*critic_net_, "states",
+              {kMinibatchSize,kStateInputCount,kCriticStateDataSize,1});
+  HasBlobSize(*critic_net_, "target",
+              {kMinibatchSize,kOutputCount,1,1});
   ClonePrimaryNet();
 }
 
-int DQN::SelectAction(const InputStates& last_states, const double epsilon) {
-  return SelectActions(std::vector<InputStates>{{last_states}}, epsilon)[0];
+int DQN::SelectAction(const ActorInputStates& last_states, const double epsilon) {
+  return SelectActions(std::vector<ActorInputStates>{{last_states}}, epsilon)[0];
 }
 
-std::vector<int> DQN::SelectActions(const std::vector<InputStates>& states_batch,
+std::vector<int> DQN::SelectActions(const std::vector<ActorInputStates>& states_batch,
                                     const double epsilon) {
   assert(epsilon >= 0.0 && epsilon <= 1.0);
   assert(states_batch.size() <= kMinibatchSize);
@@ -58,7 +67,7 @@ std::vector<int> DQN::SelectActions(const std::vector<InputStates>& states_batch
     }
   } else {
     // Select greedily
-    std::vector<ActionValue> q = SelectActionGreedily(*net_, states_batch);
+    std::vector<ActionValue> q = SelectActionGreedily(*actor_net_, states_batch);
     assert(q.size() == actions.size());
     for (int i=0; i<actions.size(); ++i) {
       actions[i] = q[i].first;
@@ -68,24 +77,24 @@ std::vector<int> DQN::SelectActions(const std::vector<InputStates>& states_batch
 }
 
 ActionValue DQN::SelectActionGreedily(caffe::Net<float>& net,
-                                      const InputStates& last_states) {
+                                      const ActorInputStates& last_states) {
   return SelectActionGreedily(
-      net, std::vector<InputStates>{{last_states}}).front();
+      net, std::vector<ActorInputStates>{{last_states}}).front();
 }
 
 std::vector<ActionValue> DQN::SelectActionGreedily(
     caffe::Net<float>& net,
-    const std::vector<InputStates>& last_states_batch) {
+    const std::vector<ActorInputStates>& last_states_batch) {
   assert(last_states_batch.size() <= kMinibatchSize);
-  std::array<float, kMinibatchDataSize> states_input;
+  StateLayerInputData states_input;
   // Input states to the net and compute Q values for each legal actions
   for (auto i = 0; i < last_states_batch.size(); ++i) {
-    for (auto j = 0; j < kInputCount; ++j) {
+    for (auto j = 0; j < kStateInputCount; ++j) {
       const auto& state_data = last_states_batch[i][j];
       std::copy(state_data->begin(),
                 state_data->end(),
-                states_input.begin() + i * kInputDataSize +
-                j * kStateDataSize);
+                states_input.begin() + i * kActorInputDataSize +
+                j * kActorStateDataSize);
     }
   }
   InputDataIntoLayers(net, states_input, dummy_input_data_, dummy_input_data_);
@@ -137,7 +146,7 @@ void DQN::Update() {
     transitions.push_back(random_transition_idx);
   }
   // Compute target values: max_a Q(s',a)
-  std::vector<InputStates> target_last_states_batch;
+  std::vector<ActorInputStates> target_last_states_batch;
   for (const auto idx : transitions) {
     const auto& transition = replay_memory_[idx];
     if (!std::get<3>(transition)) {
@@ -145,11 +154,11 @@ void DQN::Update() {
       continue;
     }
     // Compute target value
-    InputStates target_last_states;
-    for (auto i = 0; i < kInputCount - 1; ++i) {
+    ActorInputStates target_last_states;
+    for (auto i = 0; i < kStateInputCount - 1; ++i) {
       target_last_states[i] = std::get<0>(transition)[i + 1];
     }
-    target_last_states[kInputCount - 1] = std::get<3>(transition).get();
+    target_last_states[kStateInputCount - 1] = std::get<3>(transition).get();
     target_last_states_batch.push_back(target_last_states);
   }
   // Get the update targets from the cloned network
@@ -173,19 +182,19 @@ void DQN::Update() {
     assert(!std::isnan(target));
     target_input[i * kOutputCount + static_cast<int>(action)] = target;
     filter_input[i * kOutputCount + static_cast<int>(action)] = 1;
-    for (auto j = 0; j < kInputCount; ++j) {
+    for (auto j = 0; j < kStateInputCount; ++j) {
       const auto& frame_data = std::get<0>(transition)[j];
       std::copy(frame_data->begin(), frame_data->end(), states_input.begin() +
-                i * kInputDataSize + j * kStateDataSize);
+                i * kActorInputDataSize + j * kActorStateDataSize);
     }
   }
-  InputDataIntoLayers(*net_, states_input, target_input, filter_input);
-  solver_->Step(1);
+  InputDataIntoLayers(*actor_net_, states_input, target_input, filter_input);
+  actor_solver_->Step(1);
 }
 
 void DQN::ClonePrimaryNet() {
   caffe::NetParameter net_param;
-  net_->ToProto(&net_param);
+  actor_net_->ToProto(&net_param);
   clone_net_.reset(new caffe::Net<float>(net_param));
 }
 
