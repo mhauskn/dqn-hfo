@@ -68,13 +68,13 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
     dqn::ActorStateDataSp current_state_sp = std::make_shared<dqn::ActorStateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
-    if (past_states.size() < dqn::kInputFrameCount) {
+    if (past_states.size() < dqn::kStateInputCount) {
       // If there are not past states enough for DQN input, just select DASH
       Action a;
       a = {DASH, 0., 0.};
       status = hfo.act(a);
     } else {
-      while (past_states.size() > dqn::kInputFrameCount) {
+      while (past_states.size() > dqn::kStateInputCount) {
         past_states.pop_front();
       }
       dqn::ActorInputStates input_states;
@@ -199,8 +199,8 @@ int main(int argc, char** argv) {
   std::vector<int> legal_actions(dqn::kOutputCount);
   std::iota(legal_actions.begin(), legal_actions.end(), 0);
 
-  CHECK(FLAGS_critic_snapshot.empty() || FLAGS_actor_snapshot.empty()
-        || FLAGS_actor_weights.empty() || FLAGS_critic_weights.empty())
+  CHECK((FLAGS_critic_snapshot.empty() || FLAGS_actor_snapshot.empty()) &&
+        (FLAGS_actor_weights.empty() || FLAGS_critic_weights.empty()))
       << "Give a snapshot to resume training or weights to finetune "
       "but not both.";
 
@@ -209,8 +209,8 @@ int main(int argc, char** argv) {
   caffe::SolverParameter critic_solver_param;
   caffe::ReadProtoFromTextFileOrDie(FLAGS_actor_solver, &actor_solver_param);
   caffe::ReadProtoFromTextFileOrDie(FLAGS_critic_solver, &critic_solver_param);
-  actor_solver_param.set_snapshot_prefix(save_path.c_str());
-  critic_solver_param.set_snapshot_prefix(save_path.c_str());
+  actor_solver_param.set_snapshot_prefix((save_path.native() + "_actor").c_str());
+  critic_solver_param.set_snapshot_prefix((save_path.native() + "_critic").c_str());
 
   dqn::DQN dqn(legal_actions, actor_solver_param, critic_solver_param,
                FLAGS_memory, FLAGS_gamma, FLAGS_clone_freq);

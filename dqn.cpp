@@ -41,9 +41,9 @@ void DQN::Initialize() {
   critic_net_ = critic_solver_->net();
   std::fill(dummy_input_data_.begin(), dummy_input_data_.end(), 0.0);
   HasBlobSize(*actor_net_, "states",
-              {kMinibatchSize,kInputFrameCount,kActorStateDataSize,1});
+              {kMinibatchSize,kStateInputCount,kActorStateDataSize,1});
   HasBlobSize(*critic_net_, "states",
-              {kMinibatchSize,kInputFrameCount,kCriticStateDataSize,1});
+              {kMinibatchSize,kStateInputCount,kCriticStateDataSize,1});
   HasBlobSize(*critic_net_, "target",
               {kMinibatchSize,kOutputCount,1,1});
   ClonePrimaryNet();
@@ -86,10 +86,10 @@ std::vector<ActionValue> DQN::SelectActionGreedily(
     caffe::Net<float>& net,
     const std::vector<ActorInputStates>& last_states_batch) {
   assert(last_states_batch.size() <= kMinibatchSize);
-  std::array<float, kActorMinibatchDataSize> states_input;
+  StateLayerInputData states_input;
   // Input states to the net and compute Q values for each legal actions
   for (auto i = 0; i < last_states_batch.size(); ++i) {
-    for (auto j = 0; j < kInputFrameCount; ++j) {
+    for (auto j = 0; j < kStateInputCount; ++j) {
       const auto& state_data = last_states_batch[i][j];
       std::copy(state_data->begin(),
                 state_data->end(),
@@ -155,10 +155,10 @@ void DQN::Update() {
     }
     // Compute target value
     ActorInputStates target_last_states;
-    for (auto i = 0; i < kInputFrameCount - 1; ++i) {
+    for (auto i = 0; i < kStateInputCount - 1; ++i) {
       target_last_states[i] = std::get<0>(transition)[i + 1];
     }
-    target_last_states[kInputFrameCount - 1] = std::get<3>(transition).get();
+    target_last_states[kStateInputCount - 1] = std::get<3>(transition).get();
     target_last_states_batch.push_back(target_last_states);
   }
   // Get the update targets from the cloned network
@@ -182,7 +182,7 @@ void DQN::Update() {
     assert(!std::isnan(target));
     target_input[i * kOutputCount + static_cast<int>(action)] = target;
     filter_input[i * kOutputCount + static_cast<int>(action)] = 1;
-    for (auto j = 0; j < kInputFrameCount; ++j) {
+    for (auto j = 0; j < kStateInputCount; ++j) {
       const auto& frame_data = std::get<0>(transition)[j];
       std::copy(frame_data->begin(), frame_data->end(), states_input.begin() +
                 i * kActorInputDataSize + j * kActorStateDataSize);

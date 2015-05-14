@@ -13,17 +13,17 @@
 
 namespace dqn {
 
-constexpr auto kInputFrameCount = 2;
+constexpr auto kStateInputCount = 2;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kOutputCount = 1;
 
 constexpr auto kActorStateDataSize = 58;
-constexpr auto kActorInputDataSize = kActorStateDataSize * kInputFrameCount;
+constexpr auto kActorInputDataSize = kActorStateDataSize * kStateInputCount;
 constexpr auto kActorMinibatchDataSize = kActorInputDataSize * kMinibatchSize;
 
 using ActorStateData = std::array<float, kActorStateDataSize>;
 using ActorStateDataSp = std::shared_ptr<ActorStateData>;
-using ActorInputStates = std::array<ActorStateDataSp, kInputFrameCount>;
+using ActorInputStates = std::array<ActorStateDataSp, kStateInputCount>;
 using Transition = std::tuple<ActorInputStates, int,
                               float, boost::optional<ActorStateDataSp>>;
 
@@ -32,12 +32,12 @@ using TargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 using FilterLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 
 constexpr auto kCriticStateDataSize = kActorStateDataSize + kOutputCount;
-constexpr auto kCriticInputDataSize = kCriticStateDataSize * kInputFrameCount;
+constexpr auto kCriticInputDataSize = kCriticStateDataSize * kStateInputCount;
 constexpr auto kCriticMinibatchDataSize = kCriticInputDataSize * kMinibatchSize;
 
 using CriticStateData = std::array<float, kCriticInputDataSize>;
 using CriticStateDataSp = std::shared_ptr<CriticStateData>;
-using CriticInputStates = std::array<CriticStateDataSp, kInputFrameCount>;
+using CriticInputStates = std::array<CriticStateDataSp, kStateInputCount>;
 
 using CriticStateLayerInputData = std::array<float, kCriticMinibatchDataSize>;
 using CriticTargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
