@@ -76,8 +76,12 @@ public:
   void RestoreSolver(const std::string& actor_solver_file,
                      const std::string& critic_solver_bin);
 
-  // Snapshot the current model
-  void Snapshot() { actor_solver_->Snapshot(); critic_solver_->Snapshot(); }
+  // Snapshot the model/solver/replay memory. Produces files:
+  // snapshot_prefix_iter_N.[caffemodel|solverstate|replaymem]. Optionally
+  // removes snapshots that share the same prefix but have a lower
+  // iteration number.
+  void Snapshot(const std::string& snapshot_prefix, bool remove_old=false,
+                bool snapshot_memory=true);
 
   // Select an action by epsilon-greedy.
   int SelectAction(const ActorInputStates& input_states, double epsilon);
@@ -94,6 +98,9 @@ public:
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
+
+  // Save the replay memory to a gzipped compressed file
+  void SnapshotReplayMemory(const std::string& filename);
 
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
@@ -138,6 +145,31 @@ protected:
   TargetLayerInputData dummy_input_data_;
   std::mt19937 random_engine;
 };
+
+/**
+ * Returns a vector of filenames matching a given regular expression.
+ */
+std::vector<std::string> FilesMatchingRegexp(const std::string& regexp);
+
+/**
+ * Removes snapshots starting with snapshot_prefix that have an
+ * iteration less than min_iter.
+ */
+void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter);
+
+/**
+ * Look for the latest snapshot to resume from. Returns a string
+ * containing the path to the .solverstate. Returns empty string if
+ * none is found. Will only return if the snapshot contains all of:
+ * .solverstate,.caffemodel,.replaymemory
+ */
+std::string FindLatestActorSnapshot(const std::string& snapshot_prefix);
+std::string FindLatestCriticSnapshot(const std::string& snapshot_prefix);
+
+/**
+ * Look for the best HiScore matching the given snapshot prefix
+ */
+int FindHiScore(const std::string& snapshot_prefix);
 
 } // namespace dqn
 

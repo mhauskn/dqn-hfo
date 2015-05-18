@@ -28,6 +28,7 @@ DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemode
 DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
 DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solverstate).");
+DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.");
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
@@ -156,26 +157,6 @@ int main(int argc, char** argv) {
     exit(1);
   }
   path save_path(FLAGS_save);
-  path snapshot_dir(current_path());
-  // Check for files that may be overwritten
-  assert(is_directory(snapshot_dir));
-  LOG(INFO) << "Snapshots Prefix: " << save_path;
-  directory_iterator end;
-  for(directory_iterator it(snapshot_dir); it!=end; ++it) {
-    if(boost::filesystem::is_regular_file(it->status())) {
-      std::string save_path_str = save_path.stem().native();
-      std::string other_str = it->path().filename().native();
-      auto res = std::mismatch(save_path_str.begin(),
-                               save_path_str.end(),
-                               other_str.begin());
-      if (res.first == save_path_str.end()) {
-        LOG(ERROR) << "Existing file " << it->path()
-                   << " conflicts with save path " << save_path;
-        LOG(ERROR) << "Please remove this file or specify another save path.";
-        exit(1);
-      }
-    }
-  }
   // Set the logging destinations
   google::SetLogDestination(google::GLOG_INFO,
                             (save_path.native() + "_INFO_").c_str());
@@ -190,6 +171,14 @@ int main(int argc, char** argv) {
     caffe::Caffe::set_mode(caffe::Caffe::GPU);
   } else {
     caffe::Caffe::set_mode(caffe::Caffe::CPU);
+  }
+
+  // Look for a recent snapshot to resume
+  if (FLAGS_resume && FLAGS_actor_snapshot.empty()) {
+    FLAGS_actor_snapshot = dqn::FindLatestActorSnapshot(save_path.native());
+  }
+  if (FLAGS_resume && FLAGS_critic_snapshot.empty()) {
+    FLAGS_critic_snapshot = dqn::FindLatestCriticSnapshot(save_path.native());
   }
 
   HFOEnvironment hfo;
@@ -254,8 +243,11 @@ int main(int argc, char** argv) {
         LOG(INFO) << "iter " << dqn.current_iteration()
                   << " New High Score: " << avg_score;
         best_score = avg_score;
-        dqn.Snapshot();
+        std::string fname = save_path.native() + "_HiScore" +
+            std::to_string(int(avg_score));
+        dqn.Snapshot(fname, false, false);
       }
+      dqn.Snapshot(save_path.native(), true, true);
       last_eval_iter = dqn.current_iteration();
     }
   }
