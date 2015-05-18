@@ -42,7 +42,7 @@ layer {
   name: "ip2_layer"
   type: "InnerProduct"
   bottom: "ip1"
-  top: "q_values"
+  top: "kickangle"
   inner_product_param {
     num_output: 1
     weight_filler {

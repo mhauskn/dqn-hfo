@@ -24,7 +24,7 @@ constexpr auto kActorMinibatchDataSize = kActorInputDataSize * kMinibatchSize;
 using ActorStateData = std::array<float, kActorStateDataSize>;
 using ActorStateDataSp = std::shared_ptr<ActorStateData>;
 using ActorInputStates = std::array<ActorStateDataSp, kStateInputCount>;
-using Transition = std::tuple<ActorInputStates, int,
+using Transition = std::tuple<ActorInputStates, float,
                               float, boost::optional<ActorStateDataSp>>;
 
 using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
@@ -42,7 +42,7 @@ using CriticInputStates = std::array<CriticStateDataSp, kStateInputCount>;
 using CriticStateLayerInputData = std::array<float, kCriticMinibatchDataSize>;
 using CriticTargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 
-using ActionValue = std::pair<int, float>;
+using ActionValue = std::pair<float, float>;
 using SolverSp = std::shared_ptr<caffe::Solver<float>>;
 using NetSp = boost::shared_ptr<caffe::Net<float>>;
 
@@ -84,17 +84,17 @@ public:
                 bool snapshot_memory=true);
 
   // Select an action by epsilon-greedy.
-  int SelectAction(const ActorInputStates& input_states, double epsilon);
+  float SelectAction(const ActorInputStates& input_states, double epsilon);
 
   // Select a batch of actions by epsilon-greedy.
-  std::vector<int> SelectActions(const std::vector<ActorInputStates>& states_batch,
+  std::vector<float> SelectActions(const std::vector<ActorInputStates>& states_batch,
                                  double epsilon);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
 
   // Update DQN using one minibatch
-  void Update();
+  void UpdateCritic();
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
@@ -109,25 +109,30 @@ public:
   int current_iteration() const { return actor_solver_->iter(); }
 
 protected:
-  // Clone the Primary network and store the result in clone_net_
-  void ClonePrimaryNet();
+  // Clone the network and store the result in clone_net_
+  void CloneNet(NetSp& net_from, NetSp& net_to);
 
   // Given a set of input states and a network, select an
   // action. Returns the action and the estimated Q-Value.
-  ActionValue SelectActionGreedily(caffe::Net<float>& net,
-                                   const ActorInputStates& last_states);
+  float SelectActionGreedily(caffe::Net<float>& net,
+                             const ActorInputStates& last_states);
 
   // Given a batch of input states, return a batch of selected actions + values.
-  std::vector<ActionValue> SelectActionGreedily(
+  std::vector<float> SelectActionGreedily(
       caffe::Net<float>& net,
       const std::vector<ActorInputStates>& last_states);
+
+  // get the Q-value from the critic network
+  std::vector<float> GetQValue(caffe::Net<float> net,
+                               std::vector<CriticInputStates> last_critic_states_batch);
 
   // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
-                           const StateLayerInputData& states_data,
-                           const TargetLayerInputData& target_data,
-                           const FilterLayerInputData& filter_data);
+                           float* states_input,
+                           float* target_input,
+                           float* filter_input);
+
 
 protected:
   const std::vector<int> legal_actions_;
@@ -141,7 +146,7 @@ protected:
   NetSp actor_net_; // The actor network used for continuous action evaluation.
   SolverSp critic_solver_;
   NetSp critic_net_;  // The critic network used for giving q-value of a continuous action;
-  NetSp clone_net_; // Clone of primary net. Used to generate targets.
+  NetSp critic_target_net_; // Clone of critic net. Used to generate targets.
   TargetLayerInputData dummy_input_data_;
   std::mt19937 random_engine;
 };
