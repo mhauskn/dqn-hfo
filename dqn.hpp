@@ -102,11 +102,14 @@ public:
   // Save the replay memory to a gzipped compressed file
   void SnapshotReplayMemory(const std::string& filename);
 
+  // Load the replay memory from a gzipped compressed file
+  void LoadReplayMemory(const std::string& filename);
+
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
 
   // Return the current iteration of the solver
-  int current_iteration() const { return actor_solver_->iter(); }
+  int current_iteration() const { return critic_solver_->iter(); }
 
 protected:
   // Clone the network and store the result in clone_net_
@@ -168,8 +171,8 @@ void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter);
  * none is found. Will only return if the snapshot contains all of:
  * .solverstate,.caffemodel,.replaymemory
  */
-std::string FindLatestActorSnapshot(const std::string& snapshot_prefix);
-std::string FindLatestCriticSnapshot(const std::string& snapshot_prefix);
+std::tuple<std::string, std::string, std::string> FindLatestSnapshot(
+    const std::string& snapshot_prefix);
 
 /**
  * Look for the best HiScore matching the given snapshot prefix

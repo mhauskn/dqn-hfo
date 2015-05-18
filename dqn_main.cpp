@@ -28,6 +28,7 @@ DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemode
 DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
 DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solverstate).");
+DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory).");
 DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.");
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
@@ -145,8 +146,10 @@ int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
   google::InstallFailureSignalHandler();
-  // google::LogToStderr();
-
+  fLI::FLAGS_logbuflevel = -1;
+  if (FLAGS_evaluate) {
+    google::LogToStderr();
+  }
   if (!is_regular_file(FLAGS_actor_solver)) {
     LOG(ERROR) << "Invalid solver: " << FLAGS_actor_solver;
     exit(1);
@@ -174,11 +177,14 @@ int main(int argc, char** argv) {
   }
 
   // Look for a recent snapshot to resume
-  if (FLAGS_resume && FLAGS_actor_snapshot.empty()) {
-    FLAGS_actor_snapshot = dqn::FindLatestActorSnapshot(save_path.native());
-  }
-  if (FLAGS_resume && FLAGS_critic_snapshot.empty()) {
-    FLAGS_critic_snapshot = dqn::FindLatestCriticSnapshot(save_path.native());
+  LOG(INFO) << "Save path: " << save_path.native();
+  if (FLAGS_resume && FLAGS_actor_snapshot.empty()
+      && FLAGS_critic_snapshot.empty() && FLAGS_memory_snapshot.empty()) {
+    std::tuple<std::string,std::string,std::string> snapshot =
+        dqn::FindLatestSnapshot(save_path.native());
+    FLAGS_actor_snapshot = std::get<0>(snapshot);
+    FLAGS_critic_snapshot = std::get<1>(snapshot);
+    FLAGS_memory_snapshot = std::get<2>(snapshot);
   }
 
   HFOEnvironment hfo;
@@ -188,8 +194,8 @@ int main(int argc, char** argv) {
   std::vector<int> legal_actions(dqn::kOutputCount);
   std::iota(legal_actions.begin(), legal_actions.end(), 0);
 
-  CHECK((FLAGS_critic_snapshot.empty() || FLAGS_actor_snapshot.empty()) &&
-        (FLAGS_actor_weights.empty() || FLAGS_critic_weights.empty()))
+  CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
+        (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot to resume training or weights to finetune "
       "but not both.";
 
@@ -206,9 +212,13 @@ int main(int argc, char** argv) {
   dqn.Initialize();
 
   if (!FLAGS_critic_snapshot.empty() && !FLAGS_actor_snapshot.empty()) {
+    CHECK(is_regular_file(FLAGS_memory_snapshot))
+        << "Unable to find .replaymemory: " << FLAGS_memory_snapshot;
     LOG(INFO) << "Actor solver state resuming from " << FLAGS_actor_snapshot;
     LOG(INFO) << "Critic solver state resuming from " << FLAGS_critic_snapshot;
     dqn.RestoreSolver(FLAGS_actor_snapshot, FLAGS_critic_snapshot);
+    LOG(INFO) << "Loading replay memory from " << FLAGS_memory_snapshot;
+    dqn.LoadReplayMemory(FLAGS_memory_snapshot);
   } else if (!FLAGS_critic_weights.empty() || !FLAGS_actor_weights.empty()) {
     LOG(INFO) << "Actor weights finetuning from " << FLAGS_actor_weights;
     LOG(INFO) << "Critic weights finetuning from " << FLAGS_critic_weights;
@@ -236,7 +246,6 @@ int main(int argc, char** argv) {
               << ", iter = " << dqn.current_iteration()
               << ", replay_mem_size = " << dqn.memory_size();
     episode++;
-
     if (dqn.current_iteration() >= last_eval_iter + FLAGS_evaluate_freq) {
       double avg_score = Evaluate(hfo, dqn);
       if (avg_score > best_score) {

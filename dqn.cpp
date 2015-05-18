@@ -39,8 +39,8 @@ int ParseScoreFromSnapshot(const std::string& snapshot) {
 }
 
 void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter) {
-  std::string regexp(snapshot_prefix +
-                     "_iter_[0-9]+\\.(caffemodel|solverstate|replaymemory)");
+  std::string regexp(snapshot_prefix + "(_actor|_critic)?_iter_[0-9]+\\."
+                     "(caffemodel|solverstate|replaymemory)");
   for (const std::string& f : FilesMatchingRegexp(regexp)) {
     int iter = ParseIterFromSnapshot(f);
     if (iter < min_iter) {
@@ -51,45 +51,28 @@ void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter) {
   }
 }
 
-std::string FindLatestActorSnapshot(const std::string& snapshot_prefix) {
+std::tuple<std::string, std::string, std::string> FindLatestSnapshot(
+    const std::string& snapshot_prefix) {
   using namespace boost::filesystem;
-  std::string regexp(snapshot_prefix + "actor_iter_[0-9]+\\.solverstate");
+  std::string regexp(snapshot_prefix + "_(actor|critic)_iter_[0-9]+\\.solverstate");
   std::vector<std::string> matching_files = FilesMatchingRegexp(regexp);
   int max_iter = -1;
-  std::string latest = "";
+  std::tuple<std::string, std::string, std::string> latest;
   for (const std::string& f : matching_files) {
     int iter = ParseIterFromSnapshot(f);
     if (iter > max_iter) {
       // Look for an associated caffemodel + replaymemory
-      path p(f);
-      p = p.parent_path() / p.stem();
-      std::string caffemodel = p.native() + ".caffemodel";
-      std::string replaymemory = p.native() + ".replaymemory";
-      if (is_regular_file(caffemodel) && is_regular_file(replaymemory)) {
+      std::string it = std::to_string(iter);
+      std::string actor_solver = snapshot_prefix + "_actor_iter_" + it + ".solverstate";
+      std::string actor_model = snapshot_prefix + "_actor_iter_" + it + ".caffemodel";
+      std::string critic_solver = snapshot_prefix + "_critic_iter_" + it + ".solverstate";
+      std::string critic_model = snapshot_prefix + "_critic_iter_" + it + ".caffemodel";
+      std::string replaymemory = snapshot_prefix + "_iter_" + it + ".replaymemory";
+      if (is_regular_file(actor_solver) && is_regular_file(actor_model) &&
+          is_regular_file(critic_solver) && is_regular_file(critic_model) &&
+          is_regular_file(replaymemory)) {
         max_iter = iter;
-        latest = f;
-      }
-    }
-  }
-  return latest;
-}
-std::string FindLatestCriticSnapshot(const std::string& snapshot_prefix) {
-  using namespace boost::filesystem;
-  std::string regexp(snapshot_prefix + "critic_iter_[0-9]+\\.solverstate");
-  std::vector<std::string> matching_files = FilesMatchingRegexp(regexp);
-  int max_iter = -1;
-  std::string latest = "";
-  for (const std::string& f : matching_files) {
-    int iter = ParseIterFromSnapshot(f);
-    if (iter > max_iter) {
-      // Look for an associated caffemodel + replaymemory
-      path p(f);
-      p = p.parent_path() / p.stem();
-      std::string caffemodel = p.native() + ".caffemodel";
-      std::string replaymemory = p.native() + ".replaymemory";
-      if (is_regular_file(caffemodel) && is_regular_file(replaymemory)) {
-        max_iter = iter;
-        latest = f;
+        latest = std::make_tuple(actor_solver, critic_solver, replaymemory);
       }
     }
   }
@@ -148,6 +131,7 @@ std::vector<std::string> FilesMatchingRegexp(const std::string& regexp) {
 void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
                    bool snapshot_memory) {
   using namespace boost::filesystem;
+  CHECK_EQ(actor_solver_->iter(), critic_solver_->iter());
   actor_solver_->Snapshot(snapshot_prefix + "_actor");
   critic_solver_->Snapshot(snapshot_prefix + "_critic");
   int snapshot_iter = current_iteration() + 1;
@@ -158,6 +142,7 @@ void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
   CHECK(is_regular_file(fname + ".caffemodel"));
   CHECK(is_regular_file(fname + ".solverstate"));
   if (snapshot_memory) {
+    fname = snapshot_prefix + "_iter_" + std::to_string(snapshot_iter);
     std::string mem_fname = fname + ".replaymemory";
     LOG(INFO) << "Snapshotting memory to " << mem_fname;
     SnapshotReplayMemory(mem_fname);
@@ -288,27 +273,29 @@ void DQN::UpdateCritic() {
   FilterLayerInputData filter_input;
   std::fill(target_input.begin(), target_input.end(), 0.0f);
   std::fill(filter_input.begin(), filter_input.end(), 0.0f);
-  auto target_value_idx = 0;
-  for (auto i = 0; i < kMinibatchSize; ++i) {
-    const auto& transition = replay_memory_[transitions[i]];
-    const auto action = std::get<1>(transition);
-    assert(static_cast<int>(action) < kOutputCount);
-    const auto reward = std::get<2>(transition);
-    assert(reward >= -1.0 && reward <= 1.0);
-    const auto target = std::get<3>(transition) ?
-        reward + gamma_ * actions[target_value_idx++] : //TODO: BUG
-          reward;
-    assert(!std::isnan(target));
-    target_input[i * kOutputCount + static_cast<int>(action)] = target;
-    filter_input[i * kOutputCount + static_cast<int>(action)] = 1;
-    for (auto j = 0; j < kStateInputCount; ++j) {
-      const auto& frame_data = std::get<0>(transition)[j];
-      std::copy(frame_data->begin(), frame_data->end(), states_input.begin() +
-                i * kActorInputDataSize + j * kActorStateDataSize);
-    }
-  }
+  // auto target_value_idx = 0;
+  // for (auto i = 0; i < kMinibatchSize; ++i) {
+  //   const auto& transition = replay_memory_[transitions[i]];
+  //   const auto action = std::get<1>(transition);
+  //   assert(static_cast<int>(action) < kOutputCount);
+  //   const auto reward = std::get<2>(transition);
+  //   assert(reward >= -1.0 && reward <= 1.0);
+  //   const auto target = std::get<3>(transition) ?
+  //       reward + gamma_ * actions[target_value_idx++] : //TODO: BUG
+  //         reward;
+  //   assert(!std::isnan(target));
+  //   target_input[i * kOutputCount + static_cast<int>(action)] = target;
+  //   filter_input[i * kOutputCount + static_cast<int>(action)] = 1;
+  //   for (auto j = 0; j < kStateInputCount; ++j) {
+  //     const auto& frame_data = std::get<0>(transition)[j];
+  //     std::copy(frame_data->begin(), frame_data->end(), states_input.begin() +
+  //               i * kActorInputDataSize + j * kActorStateDataSize);
+  //   }
+  // }
   InputDataIntoLayers(*critic_net_, states_input.data(), target_input.data(), NULL);
   critic_solver_->Step(1);
+  InputDataIntoLayers(*actor_net_, states_input.data(), NULL, NULL);
+  actor_solver_->Step(1);
 }
 
 std::vector<float> DQN::GetQValue(
@@ -356,7 +343,7 @@ void DQN::InputDataIntoLayers(caffe::Net<float>& net,
   if (states_input != NULL) {
     const auto state_input_layer =
         boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
-            net.layer_by_name("states"));
+            net.layer_by_name("state_input_layer"));
     CHECK(state_input_layer);
     state_input_layer->Reset(states_input, states_input,
                              state_input_layer->batch_size());
@@ -364,7 +351,7 @@ void DQN::InputDataIntoLayers(caffe::Net<float>& net,
   if (target_input != NULL) {
     const auto target_input_layer =
         boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
-            net.layer_by_name("target"));
+            net.layer_by_name("target_input_layer"));
     CHECK(target_input_layer);
     target_input_layer->Reset(target_input, target_input,
                               target_input_layer->batch_size());
@@ -372,7 +359,7 @@ void DQN::InputDataIntoLayers(caffe::Net<float>& net,
   if (filter_input != NULL) {
     const auto filter_input_layer =
         boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
-            net.layer_by_name("filter"));
+            net.layer_by_name("filter_input_layer"));
     CHECK(filter_input_layer);
     filter_input_layer->Reset(filter_input, filter_input,
                               filter_input_layer->batch_size());
@@ -387,14 +374,63 @@ void DQN::SnapshotReplayMemory(const std::string& filename) {
   out.push(ofile);
   int num_transitions = memory_size();
   out.write((char*)&num_transitions, sizeof(int));
+  // For the first transition, save the history of states
+  const ActorInputStates& first_transition = std::get<0>(replay_memory_[0]);
+  for (int i = 0; i < kStateInputCount - 1; ++i) {
+    const ActorStateDataSp state = first_transition[i];
+    out.write((char*)state->begin(), kActorStateDataSize * sizeof(float));
+  }
+  // For all other transitions, save only the current state
   for (const Transition& t : replay_memory_) {
     const ActorInputStates& states = std::get<0>(t);
-    out.write((char*)frame->begin(), kStateDataSize * sizeof(uint8_t));
-    const int& action = std::get<1>(t);
-    out.write((char*)&action, sizeof(int));
+    const ActorStateDataSp curr_state = states.back();
+    out.write((char*)curr_state->begin(), kActorStateDataSize * sizeof(float));
+    const float& action = std::get<1>(t);
+    out.write((char*)&action, sizeof(float));
     const float& reward = std::get<2>(t);
     out.write((char*)&reward, sizeof(float));
   }
-  LOG(INFO) << "Saved memory of size " << replay_memory_size_;
+  LOG(INFO) << "Saved memory of size " << memory_size();
 }
+
+void DQN::LoadReplayMemory(const std::string& filename) {
+  LOG(INFO) << "Loading memory from " << filename;
+  ClearReplayMemory();
+  std::ifstream ifile(filename.c_str(),
+                      std::ios_base::in | std::ofstream::binary);
+  boost::iostreams::filtering_istream in;
+  in.push(boost::iostreams::gzip_decompressor());
+  in.push(ifile);
+  int num_transitions;
+  in.read((char*)&num_transitions, sizeof(int));
+  replay_memory_.resize(num_transitions);
+  std::deque<dqn::ActorStateDataSp> past_states;
+  // First read the state history
+  for (int i = 0; i < kStateInputCount - 1; ++i) {
+    ActorStateDataSp state = std::make_shared<ActorStateData>();
+    in.read((char*)state->begin(), kActorStateDataSize * sizeof(float));
+    past_states.push_back(state);
+  }
+  for (int i = 0; i < num_transitions; ++i) {
+    Transition& t = replay_memory_[i];
+    ActorStateDataSp state = std::make_shared<ActorStateData>();
+    in.read((char*)state->begin(), kActorStateDataSize * sizeof(float));
+    past_states.push_back(state);
+    while (past_states.size() > kStateInputCount) {
+      past_states.pop_front();
+    }
+    CHECK_EQ(past_states.size(), kStateInputCount);
+    ActorInputStates& states = std::get<0>(t);
+    std::copy(past_states.begin(), past_states.end(), states.begin());
+    in.read((char*)&std::get<1>(t), sizeof(float));
+    in.read((char*)&std::get<2>(t), sizeof(float));
+    std::get<3>(t) == boost::none;
+    // Set the next state for the last transition
+    if (i > 0) {
+      std::get<3>(replay_memory_[i-1]) = state;
+    }
+  }
+  LOG(INFO) << "replay_mem_size = " << memory_size();
+}
+
 }
