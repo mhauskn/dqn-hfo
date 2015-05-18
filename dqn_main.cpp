@@ -79,7 +79,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       }
       dqn::ActorInputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
-      const auto kickangle = dqn.SelectAction(input_states, epsilon);
+      const float kickangle = dqn.SelectAction(input_states, epsilon);
       Action action = GetAction(kickangle);
       status = hfo.act(action);
       // Rewards for DQN are normalized as follows:
@@ -105,7 +105,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         dqn.AddTransition(transition);
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
-          dqn.Update();
+          dqn.UpdateCritic();
         }
       }
     }
