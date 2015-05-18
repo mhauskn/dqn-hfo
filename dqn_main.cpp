@@ -66,7 +66,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
     const std::vector<float>& current_state = hfo.getState();
-    CHECK_EQ(current_state.size(),dqn::kActorStateDataSize);
+    CHECK_EQ(current_state.size(),dqn::kStateDataSize);
     dqn::ActorStateDataSp current_state_sp = std::make_shared<dqn::ActorStateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
@@ -98,7 +98,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       if (update) {
         // Add the current transition to replay memory
         const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(),dqn::kActorStateDataSize);
+        CHECK_EQ(next_state.size(),dqn::kStateDataSize);
         dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?

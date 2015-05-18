@@ -6,8 +6,8 @@ layer {
   top: "dummy1"
   memory_data_param {
     batch_size: 32
-    channels: 2
-    height: 59
+    channels: 1
+    height: 117
     width: 1
   }
 }
