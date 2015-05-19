@@ -1,4 +1,5 @@
 name: "DQN-Critic-Network"
+force_backward: true
 layer {
   name: "state_input_layer"
   type: "MemoryData"

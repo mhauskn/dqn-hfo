@@ -299,6 +299,59 @@ void DQN::UpdateCritic() {
   actor_solver_->Step(1);
 }
 
+void DQN::UpdateActor() {
+  // Sample transitions from replay memory
+  std::vector<int> transitions;
+  transitions.reserve(kMinibatchSize);
+  for (auto i = 0; i < kMinibatchSize; ++i) {
+    const auto random_transition_idx =
+        std::uniform_int_distribution<int>(0, replay_memory_.size() - 1)(
+            random_engine);
+    transitions.push_back(random_transition_idx);
+  }
+  // Compute target values: max_a Q(s',a)
+  std::vector<ActorInputStates> states_batch;
+  for (const auto idx : transitions) {
+    const auto& transition = replay_memory_[idx];
+    // Compute target value
+    ActorInputStates last_states;
+    for (auto i = 0; i < kStateInputCount; ++i) {
+      last_states[i] = std::get<0>(transition)[i];
+    }
+    states_batch.push_back(last_states);
+  }
+  // Get the actions from the network
+  const std::vector<float> actions =
+      SelectActionGreedily(*actor_net_, states_batch);
+  const std::vector<float> q_values = GetQValue(*critic_target_net_,
+                                                states_batch, actions);
+  const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
+  float* q_values_diff = q_values_blob->mutable_cpu_diff();
+  // TODO change the parameter value diff_num
+  float diff_num = 100.0;
+  for (int i = 0; i < kMinibatchSize; i++) {
+    q_values_diff[q_values_blob->offset(i,0,0,0)] = diff_num;
+  }
+  const std::vector<std::string> names = critic_target_net_->layer_names();
+  int pos = std::distance(names.begin(),
+                          std::find(names.begin(), names.end(), "ip2_layer"));
+  critic_target_net_->BackwardFrom(pos);
+  std::vector<float> data_diff(kMinibatchSize);
+  const auto states_blob = critic_target_net_->blob_by_name("states");
+  for (int i = 0; i < kMinibatchSize; i++) {
+    data_diff[i] = states_blob->diff_at(i, 0, kCriticInputDataSize - 1, 0);
+  }
+  const auto kickangle_blob = actor_net_->blob_by_name("kickangle");
+  float* kickangle_diff = kickangle_blob->mutable_cpu_diff();
+  for (int i = 0; i < kMinibatchSize; i++) {
+    kickangle_diff[kickangle_blob->offset(i,0,0,0)] = data_diff[i];
+  }
+  actor_net_->Backward();
+  actor_solver_->ComputeUpdateValue();
+  actor_net_->Update();
+}
+
+
 std::vector<float> DQN::GetQValue(
     caffe::Net<float>& net,
     std::vector<ActorInputStates>& last_actor_states_batch,

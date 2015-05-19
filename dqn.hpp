@@ -95,6 +95,9 @@ public:
   // Update DQN using one minibatch
   void UpdateCritic();
 
+  // update the actor network
+  void UpdateActor();
+
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
 
