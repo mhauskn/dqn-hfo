@@ -269,7 +269,7 @@ void DQN::UpdateCritic() {
       SelectActionGreedily(*actor_net_, target_last_states_batch);
   const std::vector<float> q_values = GetQValue(*critic_target_net_,
                                                 target_last_states_batch, actions);
-  StateLayerInputData states_input;
+  CriticStateLayerInputData states_input;
   TargetLayerInputData target_input;
   std::fill(states_input.begin(), states_input.end(), 0.0);
   std::fill(target_input.begin(), target_input.end(), 0.0);
@@ -285,8 +285,8 @@ void DQN::UpdateCritic() {
     CHECK(!std::isnan(target));
     target_input[i * kOutputCount] = target;
     for (auto j = 0; j < kStateInputCount; ++j) {
-      const auto& frame_data = std::get<0>(transition)[j];
-      std::copy(frame_data->begin(), frame_data->end(), states_input.begin() +
+      const auto& state_data = std::get<0>(transition)[j];
+      std::copy(state_data->begin(), state_data->end(), states_input.begin() +
                 i * kCriticInputDataSize + j * kStateDataSize);
     }
     for(int j = 0; j < kOutputCount; j++) {
@@ -295,8 +295,6 @@ void DQN::UpdateCritic() {
   }
   InputDataIntoLayers(*critic_net_, states_input.data(), target_input.data(), NULL);
   critic_solver_->Step(1);
-  InputDataIntoLayers(*actor_net_, states_input.data(), NULL, NULL);
-  actor_solver_->Step(1);
 }
 
 void DQN::UpdateActor() {
