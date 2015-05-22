@@ -108,6 +108,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
           dqn.UpdateCritic();
+          dqn.UpdateActor();
         }
       }
     }

@@ -29,7 +29,7 @@ using Transition = std::tuple<ActorInputStates, float,
 
 using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
 using TargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
-using FilterLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
+// using FilterLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 
 constexpr auto kCriticInputDataSize = kStateDataSize * kStateInputCount
     + kOutputCount;
@@ -39,7 +39,6 @@ constexpr auto kCriticMinibatchDataSize = kCriticInputDataSize * kMinibatchSize;
 // using CriticStateDataSp = std::shared_ptr<CriticStateData>;
 // using CriticInputStates = std::array<CriticStateDataSp, kStateInputCount>;
 using CriticStateLayerInputData = std::array<float, kCriticMinibatchDataSize>;
-using CriticTargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
 
 using ActionValue = std::pair<float, float>;
 using SolverSp = std::shared_ptr<caffe::Solver<float>>;
@@ -94,6 +93,9 @@ public:
 
   // Update DQN using one minibatch
   void UpdateCritic();
+
+  // update the actor network
+  void UpdateActor();
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
