@@ -34,6 +34,7 @@ DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates")
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
+DEFINE_int32(actor_update_factor, 4, "Number of actor updates per critic update");
 DEFINE_string(actor_solver, "dqn_actor_solver.prototxt", "Actor solver parameter file (*.prototxt)");
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt", "Critic solver parameter file (*.prototxt)");
 
@@ -49,8 +50,8 @@ double CalculateEpsilon(const int iter) {
  * Converts a discrete action into a continuous HFO-action
  x*/
 Action GetAction(float kickangle) {
-  CHECK_LT(kickangle, 90);
-  CHECK_GT(kickangle, -90);
+  // CHECK_LT(kickangle, 90);
+  // CHECK_GT(kickangle, -90);
   Action a;
   a = {KICK, 100., kickangle};
   return a;
@@ -108,7 +109,9 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
           dqn.UpdateCritic();
-          dqn.UpdateActor();
+          for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
+            dqn.UpdateActor();
+          }
         }
       }
     }
@@ -236,6 +239,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+
   int last_eval_iter = 0;
   int episode = 0;
   double best_score = std::numeric_limits<double>::min();
@@ -247,6 +251,7 @@ int main(int argc, char** argv) {
               << ", iter = " << dqn.current_iteration()
               << ", replay_mem_size = " << dqn.memory_size();
     episode++;
+
     if (dqn.current_iteration() >= last_eval_iter + FLAGS_evaluate_freq) {
       double avg_score = Evaluate(hfo, dqn);
       if (avg_score > best_score) {
