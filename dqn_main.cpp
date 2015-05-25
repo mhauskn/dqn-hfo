@@ -31,6 +31,7 @@ DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solversta
 DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory).");
 DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.");
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
+DEFINE_bool(delay_reward, true, "If false will skip the timesteps between shooting EOT. ");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
@@ -85,6 +86,11 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       const float kickangle = dqn.SelectAction(input_states, epsilon);
       Action action = GetAction(kickangle);
       status = hfo.act(action);
+      if (!FLAGS_delay_reward) { // Skip to EOT if not delayed reward
+        while (status == IN_GAME) {
+          status = hfo.act(action);
+        }
+      }
       // Rewards for DQN are normalized as follows:
       // 1 for scoring a goal, -1 for captured by defense, out of bounds, out of time
       // 0 for other middle states
