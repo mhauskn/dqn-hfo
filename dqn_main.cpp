@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <limits>
+#include <stdlib.h>
 
 using namespace boost::filesystem;
 
@@ -23,7 +24,6 @@ DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network.");
 DEFINE_int32(memory_threshold, 50000, "Number of transitions to start learning");
-DEFINE_int32(skip_frame, 3, "Number of frames skipped");
 DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemodel).");
 DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
@@ -38,6 +38,8 @@ DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
 DEFINE_int32(actor_update_factor, 4, "Number of actor updates per critic update");
 DEFINE_string(actor_solver, "dqn_actor_solver.prototxt", "Actor solver parameter file (*.prototxt)");
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt", "Critic solver parameter file (*.prototxt)");
+DEFINE_string(server_cmd, "./scripts/start.py --offense 1 --defense 0 --headless &",
+                "Command executed to start the HFO server.");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -196,6 +198,9 @@ int main(int argc, char** argv) {
     FLAGS_critic_snapshot = std::get<1>(snapshot);
     FLAGS_memory_snapshot = std::get<2>(snapshot);
   }
+
+  // Start the server
+  CHECK_EQ(system(FLAGS_server_cmd.c_str()), 0) << "Unable to start the HFO server.";
 
   HFOEnvironment hfo;
   hfo.connectToAgentServer(6008);
