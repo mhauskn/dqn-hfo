@@ -36,10 +36,13 @@ DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation 
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
 DEFINE_int32(actor_update_factor, 4, "Number of actor updates per critic update");
-DEFINE_string(actor_solver, "dqn_actor_solver.prototxt", "Actor solver parameter file (*.prototxt)");
-DEFINE_string(critic_solver, "dqn_critic_solver.prototxt", "Critic solver parameter file (*.prototxt)");
-DEFINE_string(server_cmd, "./scripts/start.py --offense 1 --defense 0 --headless &",
+DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
+              "Actor solver parameter file (*.prototxt)");
+DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
+              "Critic solver parameter file (*.prototxt)");
+DEFINE_string(server_cmd, "./scripts/start.py --offense 1 --defense 0",
                 "Command executed to start the HFO server.");
+DEFINE_int32(port, -1, "Port to use for server/client.");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -199,11 +202,18 @@ int main(int argc, char** argv) {
     FLAGS_memory_snapshot = std::get<2>(snapshot);
   }
 
-  // Start the server
-  CHECK_EQ(system(FLAGS_server_cmd.c_str()), 0) << "Unable to start the HFO server.";
+  if (FLAGS_port < 0) {
+    srand(time(0));
+    FLAGS_port = rand() % 40000 + 20000;
+  }
+  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
+  if (!FLAGS_gui) { cmd += " --headless"; }
+  cmd += " &";
+  LOG(INFO) << "Starting server with command: " << cmd;
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
 
   HFOEnvironment hfo;
-  hfo.connectToAgentServer(6008);
+  hfo.connectToAgentServer(FLAGS_port);
 
   // Get the vector of legal actions
   std::vector<int> legal_actions(dqn::kOutputCount);
@@ -241,15 +251,9 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_evaluate) {
-    if (FLAGS_gui) {
-      auto score = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
-      LOG(INFO) << "Score " << score;
-    } else {
-      Evaluate(hfo, dqn);
-    }
+    Evaluate(hfo, dqn);
     return 0;
   }
-
 
   int last_eval_iter = 0;
   int episode = 0;
