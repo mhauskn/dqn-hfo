@@ -38,9 +38,7 @@ int ParseScoreFromSnapshot(const std::string& snapshot) {
   return std::stoi(snapshot.substr(start+8, end-start-1));
 }
 
-void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter) {
-  std::string regexp(snapshot_prefix + "(_actor|_critic)?_iter_[0-9]+\\."
-                     "(caffemodel|solverstate|replaymemory)");
+void RemoveSnapshots(const std::string& regexp, int min_iter) {
   for (const std::string& f : FilesMatchingRegexp(regexp)) {
     int iter = ParseIterFromSnapshot(f);
     if (iter < min_iter) {
@@ -51,32 +49,40 @@ void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter) {
   }
 }
 
-std::tuple<std::string, std::string, std::string> FindLatestSnapshot(
-    const std::string& snapshot_prefix) {
-  using namespace boost::filesystem;
-  std::string regexp(snapshot_prefix + "_(actor|critic)_iter_[0-9]+\\.solverstate");
-  std::vector<std::string> matching_files = FilesMatchingRegexp(regexp);
+int FindGreatestIter(const std::string& regexp) {
   int max_iter = -1;
-  std::tuple<std::string, std::string, std::string> latest;
+  std::vector<std::string> matching_files = FilesMatchingRegexp(regexp);
   for (const std::string& f : matching_files) {
     int iter = ParseIterFromSnapshot(f);
     if (iter > max_iter) {
-      // Look for an associated caffemodel + replaymemory
-      std::string it = std::to_string(iter);
-      std::string actor_solver = snapshot_prefix + "_actor_iter_" + it + ".solverstate";
-      std::string actor_model = snapshot_prefix + "_actor_iter_" + it + ".caffemodel";
-      std::string critic_solver = snapshot_prefix + "_critic_iter_" + it + ".solverstate";
-      std::string critic_model = snapshot_prefix + "_critic_iter_" + it + ".caffemodel";
-      std::string replaymemory = snapshot_prefix + "_iter_" + it + ".replaymemory";
-      if (is_regular_file(actor_solver) && is_regular_file(actor_model) &&
-          is_regular_file(critic_solver) && is_regular_file(critic_model) &&
-          is_regular_file(replaymemory)) {
-        max_iter = iter;
-        latest = std::make_tuple(actor_solver, critic_solver, replaymemory);
-      }
+      max_iter = iter;
     }
   }
-  return latest;
+  return max_iter;
+}
+
+void FindLatestSnapshot(const std::string& snapshot_prefix,
+                        std::string& actor_snapshot,
+                        std::string& critic_snapshot,
+                        std::string& memory_snapshot) {
+  std::string actor_regexp(snapshot_prefix + "_actor_iter_[0-9]+\\.solverstate");
+  std::string critic_regexp(snapshot_prefix + "_critic_iter_[0-9]+\\.solverstate");
+  std::string memory_regexp(snapshot_prefix + "_iter_[0-9]+\\.replaymemory");
+  int actor_max_iter = FindGreatestIter(actor_regexp);
+  int critic_max_iter = FindGreatestIter(critic_regexp);
+  int memory_max_iter = FindGreatestIter(memory_regexp);
+  if (actor_max_iter > 0) {
+    actor_snapshot = snapshot_prefix + "_actor_iter_"
+        + std::to_string(actor_max_iter) + ".solverstate";
+  }
+  if (critic_max_iter > 0) {
+    critic_snapshot = snapshot_prefix + "_critic_iter_"
+        + std::to_string(critic_max_iter) + ".solverstate";
+  }
+  if (memory_max_iter > 0) {
+    memory_snapshot = snapshot_prefix + "_iter_"
+        + std::to_string(memory_max_iter) + ".replaymemory";
+  }
 }
 
 int FindHiScore(const std::string& snapshot_prefix) {
@@ -133,25 +139,29 @@ std::vector<std::string> FilesMatchingRegexp(const std::string& regexp) {
 void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
                    bool snapshot_memory) {
   using namespace boost::filesystem;
-  CHECK_EQ(actor_solver_->iter(), critic_solver_->iter());
   actor_solver_->Snapshot(snapshot_prefix + "_actor");
   critic_solver_->Snapshot(snapshot_prefix + "_critic");
-  int snapshot_iter = current_iteration() + 1;
-  std::string fname = snapshot_prefix + "_actor_iter_" + std::to_string(snapshot_iter);
+  int actor_iter = actor_solver_->iter() + 1;
+  std::string fname = snapshot_prefix + "_actor_iter_" + std::to_string(actor_iter);
   CHECK(is_regular_file(fname + ".caffemodel"));
   CHECK(is_regular_file(fname + ".solverstate"));
-  fname = snapshot_prefix + "_critic_iter_" + std::to_string(snapshot_iter);
+  int critic_iter = critic_solver_->iter() + 1;
+  fname = snapshot_prefix + "_critic_iter_" + std::to_string(critic_iter);
   CHECK(is_regular_file(fname + ".caffemodel"));
   CHECK(is_regular_file(fname + ".solverstate"));
   if (snapshot_memory) {
-    fname = snapshot_prefix + "_iter_" + std::to_string(snapshot_iter);
+    fname = snapshot_prefix + "_iter_" + std::to_string(critic_iter);
     std::string mem_fname = fname + ".replaymemory";
     LOG(INFO) << "Snapshotting memory to " << mem_fname;
     SnapshotReplayMemory(mem_fname);
     CHECK(is_regular_file(mem_fname));
   }
   if (remove_old) {
-    RemoveSnapshots(snapshot_prefix, snapshot_iter);
+    RemoveSnapshots(snapshot_prefix + "_actor_iter_[0-9]+"
+                    "\\.(caffemodel|solverstate)", actor_iter);
+    RemoveSnapshots(snapshot_prefix + "_critic_iter_[0-9]+"
+                    "\\.(caffemodel|solverstate)", critic_iter);
+    RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter);
   }
 }
 
@@ -350,6 +360,7 @@ void DQN::UpdateActor() {
   // Run backwards to update the Actor network
   actor_net_->Backward();
   actor_solver_->ComputeUpdateValue();
+  actor_solver_->set_iter(actor_solver_->iter() + 1);
   actor_net_->Update();
 }
 

@@ -41,7 +41,7 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd, "./scripts/start.py --offense 1 --defense 0",
-                "Command executed to start the HFO server.");
+              "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 
 double CalculateEpsilon(const int iter) {
@@ -195,11 +195,8 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Save path: " << save_path.native();
   if (FLAGS_resume && FLAGS_actor_snapshot.empty()
       && FLAGS_critic_snapshot.empty() && FLAGS_memory_snapshot.empty()) {
-    std::tuple<std::string,std::string,std::string> snapshot =
-        dqn::FindLatestSnapshot(save_path.native());
-    FLAGS_actor_snapshot = std::get<0>(snapshot);
-    FLAGS_critic_snapshot = std::get<1>(snapshot);
-    FLAGS_memory_snapshot = std::get<2>(snapshot);
+    dqn::FindLatestSnapshot(save_path.native(), FLAGS_actor_snapshot,
+                            FLAGS_critic_snapshot, FLAGS_memory_snapshot);
   }
 
   if (FLAGS_port < 0) {
