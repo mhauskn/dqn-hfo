@@ -40,7 +40,8 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
               "Actor solver parameter file (*.prototxt)");
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
-DEFINE_string(server_cmd, "./scripts/start.py --offense 1 --defense 0",
+DEFINE_string(server_cmd,
+              "./scripts/start.py --offense 1 --defense 0 --agent-on-ball --fullstate --no-logging",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 
@@ -68,20 +69,19 @@ Action GetAction(float kickangle) {
  */
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
+  hfo.act({DASH, 0, 0});
   std::deque<dqn::ActorStateDataSp> past_states;
   double total_score;
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
     const std::vector<float>& current_state = hfo.getState();
-    CHECK_EQ(current_state.size(),dqn::kStateDataSize);
+    CHECK_EQ(current_state.size(), dqn::kStateDataSize);
     dqn::ActorStateDataSp current_state_sp = std::make_shared<dqn::ActorStateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kStateInputCount) {
       // If there are not past states enough for DQN input, just select DASH
-      Action a;
-      a = {DASH, 0., 0.};
-      status = hfo.act(a);
+      status = hfo.act({DASH, 0., 0.});
     } else {
       while (past_states.size() > dqn::kStateInputCount) {
         past_states.pop_front();
@@ -103,19 +103,24 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       if (status == GOAL) {
         reward = 1;
       } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
-               status == OUT_OF_TIME) {
+                 status == OUT_OF_TIME) {
         reward = -1;
+      } else {
+        LOG(FATAL) << "Trial ended with Unknown status: " << status;
       }
       total_score = reward;
       if (update) {
         // Add the current transition to replay memory
         const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(),dqn::kStateDataSize);
+        CHECK_EQ(next_state.size(), dqn::kStateDataSize);
         dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?
             dqn::Transition(input_states, kickangle, reward, next_state_sp):
             dqn::Transition(input_states, kickangle, reward, boost::none);
+        if (!FLAGS_delay_reward) {
+          CHECK(!std::get<3>(transition)) << "Expected no next state...";
+        }
         dqn.AddTransition(transition);
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
@@ -210,7 +215,7 @@ int main(int argc, char** argv) {
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
 
   HFOEnvironment hfo;
-  hfo.connectToAgentServer(FLAGS_port);
+  hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
 
   // Get the vector of legal actions
   std::vector<int> legal_actions(dqn::kOutputCount);
@@ -241,10 +246,12 @@ int main(int argc, char** argv) {
     dqn.RestoreSolver(FLAGS_actor_snapshot, FLAGS_critic_snapshot);
     LOG(INFO) << "Loading replay memory from " << FLAGS_memory_snapshot;
     dqn.LoadReplayMemory(FLAGS_memory_snapshot);
-  } else if (!FLAGS_critic_weights.empty() || !FLAGS_actor_weights.empty()) {
+  } else if (!FLAGS_critic_weights.empty() && !FLAGS_actor_weights.empty()) {
     LOG(INFO) << "Actor weights finetuning from " << FLAGS_actor_weights;
     LOG(INFO) << "Critic weights finetuning from " << FLAGS_critic_weights;
     dqn.LoadTrainedModel(FLAGS_actor_weights, FLAGS_critic_weights);
+  } else {
+    LOG(FATAL) << "Need to specify both actor and critic snapshots or neither.";
   }
 
   if (FLAGS_evaluate) {
@@ -271,7 +278,7 @@ int main(int argc, char** argv) {
                   << " New High Score: " << avg_score;
         best_score = avg_score;
         std::string fname = save_path.native() + "_HiScore" +
-            std::to_string(int(avg_score));
+            std::to_string(avg_score);
         dqn.Snapshot(fname, false, false);
       }
       dqn.Snapshot(save_path.native(), true, true);

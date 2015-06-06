@@ -13,7 +13,7 @@
 
 namespace dqn {
 
-constexpr auto kStateInputCount = 2;
+constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kOutputCount = 1;
 constexpr auto kStateDataSize = 58;

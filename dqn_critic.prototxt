@@ -8,7 +8,7 @@ layer {
   memory_data_param {
     batch_size: 32
     channels: 1
-    height: 117
+    height: 59
     width: 1
   }
 }
