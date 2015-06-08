@@ -24,6 +24,7 @@ DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network.");
 DEFINE_int32(memory_threshold, 50000, "Number of transitions to start learning");
+DEFINE_int32(updates_per_action, 1, "Updates done after each action taken");
 DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemodel).");
 DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
@@ -41,7 +42,7 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd,
-              "./scripts/start.py --offense 1 --defense 0 --agent-on-ball --fullstate --no-logging",
+              "./scripts/start.py --offense 1 --defense 0 --agent-on-ball --fullstate",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 
@@ -124,9 +125,11 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         dqn.AddTransition(transition);
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
-          dqn.UpdateCritic();
-          for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
-            dqn.UpdateActor();
+          for (int i = 0; i < FLAGS_updates_per_action; ++i) {
+            dqn.UpdateCritic();
+            for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
+              dqn.UpdateActor();
+            }
           }
         }
       }
@@ -205,11 +208,12 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_port < 0) {
-    srand(time(0));
+    srand(std::hash<std::string>()(save_path.native()));
     FLAGS_port = rand() % 40000 + 20000;
   }
   std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
   if (!FLAGS_gui) { cmd += " --headless"; }
+  if (!FLAGS_evaluate) { cmd += " --no-logging"; }
   cmd += " &";
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
@@ -250,8 +254,6 @@ int main(int argc, char** argv) {
     LOG(INFO) << "Actor weights finetuning from " << FLAGS_actor_weights;
     LOG(INFO) << "Critic weights finetuning from " << FLAGS_critic_weights;
     dqn.LoadTrainedModel(FLAGS_actor_weights, FLAGS_critic_weights);
-  } else {
-    LOG(FATAL) << "Need to specify both actor and critic snapshots or neither.";
   }
 
   if (FLAGS_evaluate) {
