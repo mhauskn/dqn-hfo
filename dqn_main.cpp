@@ -36,7 +36,7 @@ DEFINE_bool(delay_reward, true, "If false will skip the timesteps between shooti
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
-DEFINE_int32(actor_update_factor, 4, "Number of actor updates per critic update");
+DEFINE_int32(actor_update_factor, 1, "Number of actor updates per critic update");
 DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
               "Actor solver parameter file (*.prototxt)");
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
