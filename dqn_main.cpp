@@ -42,7 +42,7 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd,
-              "./scripts/start.py --offense 1 --defense 0 --agent-on-ball --fullstate",
+              "./scripts/start.py --offense-agents 1 --agent-on-ball --fullstate",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 
