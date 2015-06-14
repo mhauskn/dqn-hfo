@@ -106,8 +106,6 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
                  status == OUT_OF_TIME) {
         reward = -1;
-      } else {
-        LOG(FATAL) << "Trial ended with Unknown status: " << status;
       }
       total_score = reward;
       if (update) {
