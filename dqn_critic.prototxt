@@ -8,7 +8,7 @@ layer {
   memory_data_param {
     batch_size: 32
     channels: 1
-    height: 117
+    height: 59
     width: 1
   }
 }
@@ -39,7 +39,11 @@ layer {
     num_output: 256
     weight_filler {
       type: "gaussian"
-      std: 0.01
+      std: 0.05
+    }
+    bias_filler {
+      type: "constant"
+      value: 1
     }
   }
 }
@@ -61,7 +65,11 @@ layer {
     num_output: 1
     weight_filler {
       type: "gaussian"
-      std: 0.01
+      std: 0.05
+    }
+    bias_filler {
+      type: "constant"
+      value: 1
     }
   }
 }

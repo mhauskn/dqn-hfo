@@ -38,9 +38,7 @@ int ParseScoreFromSnapshot(const std::string& snapshot) {
   return std::stoi(snapshot.substr(start+8, end-start-1));
 }
 
-void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter) {
-  std::string regexp(snapshot_prefix + "(_actor|_critic)?_iter_[0-9]+\\."
-                     "(caffemodel|solverstate|replaymemory)");
+void RemoveSnapshots(const std::string& regexp, int min_iter) {
   for (const std::string& f : FilesMatchingRegexp(regexp)) {
     int iter = ParseIterFromSnapshot(f);
     if (iter < min_iter) {
@@ -51,32 +49,40 @@ void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter) {
   }
 }
 
-std::tuple<std::string, std::string, std::string> FindLatestSnapshot(
-    const std::string& snapshot_prefix) {
-  using namespace boost::filesystem;
-  std::string regexp(snapshot_prefix + "_(actor|critic)_iter_[0-9]+\\.solverstate");
-  std::vector<std::string> matching_files = FilesMatchingRegexp(regexp);
+int FindGreatestIter(const std::string& regexp) {
   int max_iter = -1;
-  std::tuple<std::string, std::string, std::string> latest;
+  std::vector<std::string> matching_files = FilesMatchingRegexp(regexp);
   for (const std::string& f : matching_files) {
     int iter = ParseIterFromSnapshot(f);
     if (iter > max_iter) {
-      // Look for an associated caffemodel + replaymemory
-      std::string it = std::to_string(iter);
-      std::string actor_solver = snapshot_prefix + "_actor_iter_" + it + ".solverstate";
-      std::string actor_model = snapshot_prefix + "_actor_iter_" + it + ".caffemodel";
-      std::string critic_solver = snapshot_prefix + "_critic_iter_" + it + ".solverstate";
-      std::string critic_model = snapshot_prefix + "_critic_iter_" + it + ".caffemodel";
-      std::string replaymemory = snapshot_prefix + "_iter_" + it + ".replaymemory";
-      if (is_regular_file(actor_solver) && is_regular_file(actor_model) &&
-          is_regular_file(critic_solver) && is_regular_file(critic_model) &&
-          is_regular_file(replaymemory)) {
-        max_iter = iter;
-        latest = std::make_tuple(actor_solver, critic_solver, replaymemory);
-      }
+      max_iter = iter;
     }
   }
-  return latest;
+  return max_iter;
+}
+
+void FindLatestSnapshot(const std::string& snapshot_prefix,
+                        std::string& actor_snapshot,
+                        std::string& critic_snapshot,
+                        std::string& memory_snapshot) {
+  std::string actor_regexp(snapshot_prefix + "_actor_iter_[0-9]+\\.solverstate");
+  std::string critic_regexp(snapshot_prefix + "_critic_iter_[0-9]+\\.solverstate");
+  std::string memory_regexp(snapshot_prefix + "_iter_[0-9]+\\.replaymemory");
+  int actor_max_iter = FindGreatestIter(actor_regexp);
+  int critic_max_iter = FindGreatestIter(critic_regexp);
+  int memory_max_iter = FindGreatestIter(memory_regexp);
+  if (actor_max_iter > 0) {
+    actor_snapshot = snapshot_prefix + "_actor_iter_"
+        + std::to_string(actor_max_iter) + ".solverstate";
+  }
+  if (critic_max_iter > 0) {
+    critic_snapshot = snapshot_prefix + "_critic_iter_"
+        + std::to_string(critic_max_iter) + ".solverstate";
+  }
+  if (memory_max_iter > 0) {
+    memory_snapshot = snapshot_prefix + "_iter_"
+        + std::to_string(memory_max_iter) + ".replaymemory";
+  }
 }
 
 int FindHiScore(const std::string& snapshot_prefix) {
@@ -97,12 +103,14 @@ void DQN::LoadTrainedModel(const std::string& actor_model_bin,
                            const std::string& critic_model_bin) {
   actor_net_->CopyTrainedLayersFrom(actor_model_bin);
   critic_net_->CopyTrainedLayersFrom(critic_model_bin);
+  CloneNet(critic_net_, critic_target_net_);
 }
 
 void DQN::RestoreSolver(const std::string& actor_solver_bin,
                         const std::string& critic_solver_bin) {
   actor_solver_->Restore(actor_solver_bin.c_str());
   critic_solver_->Restore(critic_solver_bin.c_str());
+  CloneNet(critic_net_, critic_target_net_);
 }
 
 std::vector<std::string> FilesMatchingRegexp(const std::string& regexp) {
@@ -131,25 +139,29 @@ std::vector<std::string> FilesMatchingRegexp(const std::string& regexp) {
 void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
                    bool snapshot_memory) {
   using namespace boost::filesystem;
-  CHECK_EQ(actor_solver_->iter(), critic_solver_->iter());
   actor_solver_->Snapshot(snapshot_prefix + "_actor");
   critic_solver_->Snapshot(snapshot_prefix + "_critic");
-  int snapshot_iter = current_iteration() + 1;
-  std::string fname = snapshot_prefix + "_actor_iter_" + std::to_string(snapshot_iter);
+  int actor_iter = actor_solver_->iter() + 1;
+  std::string fname = snapshot_prefix + "_actor_iter_" + std::to_string(actor_iter);
   CHECK(is_regular_file(fname + ".caffemodel"));
   CHECK(is_regular_file(fname + ".solverstate"));
-  fname = snapshot_prefix + "_critic_iter_" + std::to_string(snapshot_iter);
+  int critic_iter = critic_solver_->iter() + 1;
+  fname = snapshot_prefix + "_critic_iter_" + std::to_string(critic_iter);
   CHECK(is_regular_file(fname + ".caffemodel"));
   CHECK(is_regular_file(fname + ".solverstate"));
   if (snapshot_memory) {
-    fname = snapshot_prefix + "_iter_" + std::to_string(snapshot_iter);
+    fname = snapshot_prefix + "_iter_" + std::to_string(critic_iter);
     std::string mem_fname = fname + ".replaymemory";
     LOG(INFO) << "Snapshotting memory to " << mem_fname;
     SnapshotReplayMemory(mem_fname);
     CHECK(is_regular_file(mem_fname));
   }
   if (remove_old) {
-    RemoveSnapshots(snapshot_prefix, snapshot_iter);
+    RemoveSnapshots(snapshot_prefix + "_actor_iter_[0-9]+"
+                    "\\.(caffemodel|solverstate)", actor_iter);
+    RemoveSnapshots(snapshot_prefix + "_critic_iter_[0-9]+"
+                    "\\.(caffemodel|solverstate)", critic_iter);
+    RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter);
   }
 }
 
@@ -320,56 +332,36 @@ void DQN::UpdateActor() {
     }
     states_batch.push_back(last_states);
   }
-  float start_q = 0;
-  for(int k = 0; k<100; k++) {
-    // Get the actions and q_values from the network
-    const std::vector<float> actions =
-        SelectActionGreedily(*actor_net_, states_batch);
-    const std::vector<float> q_values = GetQValue(*critic_target_net_,
-                                                  states_batch, actions);
-    LOG(INFO) << "Iteration " << k <<" in updating the Actor network";
-    LOG(INFO) << "q_value[0] = " << q_values[0] << " action[0] = " << actions[0];
-    if (k == 0) {
-      start_q = q_values[0];
-    }
-    // Set the q_value diff to be a positve num
-    const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
-    float* q_values_diff = q_values_blob->mutable_cpu_diff();
-    // TODO change the parameter value diff_num
-    float diff_num = -10.0;
-    for (int i = 0; i < kMinibatchSize; i++) {
-      q_values_diff[q_values_blob->offset(i,0,0,0)] = diff_num;
-    }
-    // Run the network backwards to see the resulting actions diff at the input layer
-    const std::vector<std::string> names = critic_target_net_->layer_names();
-    int pos = std::distance(names.begin(),
-                            std::find(names.begin(), names.end(), "ip2_layer"));
-    critic_target_net_->BackwardFrom(pos);
-    std::vector<float> data_diff(kMinibatchSize);
-    // std::vector<float> data_all_states_diff(kCriticInputDataSize);
-    const auto states_blob = critic_target_net_->blob_by_name("states");
-    // Set the diff in the actions ouput in Actor network
-    for (int i = 0; i < kMinibatchSize; i++) {
-      float d = states_blob->diff_at(i, 0, kCriticInputDataSize - 1, 0);
-      data_diff[i] = d;//q_values[i] > 0 ? d : -d;
-    }
-    LOG(INFO) << "data_diff[0] = " << data_diff[0];
-    // for (int t = 0; t < kCriticInputDataSize ; t++) {
-    //   data_all_states_diff[t] = states_blob->diff_at(0, 0, t, 0);
-    //   // LOG(INFO) << "data_all_states_diff[" << t << "] = " << data_all_states_diff[t];
-    // }
-    const auto kickangle_blob = actor_net_->blob_by_name("kickangle");
-    float* kickangle_diff = kickangle_blob->mutable_cpu_diff();
-    for (int i = 0; i < kMinibatchSize; i++) {
-      kickangle_diff[kickangle_blob->offset(i,0,0,0)] = data_diff[i];
-    }
-    // Run backwards to update the Actor network
-    actor_net_->Backward();
-    actor_solver_->ComputeUpdateValue();
-    actor_net_->Update();
-    LOG(INFO) << "QDiff: " << q_values[0] - start_q;
+  // Get the actions and q_values from the network
+  const std::vector<float> actions =
+      SelectActionGreedily(*actor_net_, states_batch);
+  const std::vector<float> q_values = GetQValue(
+      *critic_target_net_, states_batch, actions);
+  const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
+  float* q_values_diff = q_values_blob->mutable_cpu_diff();
+  for (int i = 0; i < kMinibatchSize; i++) {
+    q_values_diff[q_values_blob->offset(i,0,0,0)] = -1.0;
   }
-  exit(0);
+  // Run the network backwards and get the action diff at the input layer
+  const std::vector<std::string>& names = critic_target_net_->layer_names();
+  int ip2_indx = std::distance(names.begin(), std::find(names.begin(), names.end(), "ip2_layer"));
+  CHECK_LT(ip2_indx, names.size()) << "[Actor Update] Couldn't find ip2_layer";
+  critic_target_net_->BackwardFrom(ip2_indx);
+  CHECK(critic_target_net_->has_blob("states"));
+  const auto states_blob = critic_target_net_->blob_by_name("states");
+  CHECK(actor_net_->has_blob("kickangle"));
+  const auto kickangle_blob = actor_net_->blob_by_name("kickangle");
+  // Set the diff in the actions ouput in Actor network
+  float* kickangle_diff = kickangle_blob->mutable_cpu_diff();
+  for (int i = 0; i < kMinibatchSize; i++) {
+    kickangle_diff[kickangle_blob->offset(i,0,0,0)] =
+        states_blob->diff_at(i, 0, kCriticInputDataSize-1, 0);
+  }
+  // Run backwards to update the Actor network
+  actor_net_->Backward();
+  actor_solver_->ComputeUpdateValue();
+  actor_solver_->set_iter(actor_solver_->iter() + 1);
+  actor_net_->Update();
 }
 
 

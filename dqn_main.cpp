@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <limits>
+#include <stdlib.h>
 
 using namespace boost::filesystem;
 
@@ -23,7 +24,7 @@ DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network.");
 DEFINE_int32(memory_threshold, 50000, "Number of transitions to start learning");
-DEFINE_int32(skip_frame, 3, "Number of frames skipped");
+DEFINE_int32(updates_per_action, 1, "Updates done after each action taken");
 DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemodel).");
 DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
@@ -31,11 +32,19 @@ DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solversta
 DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory).");
 DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.");
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
+DEFINE_bool(delay_reward, true, "If false will skip the timesteps between shooting EOT. ");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
-DEFINE_string(actor_solver, "dqn_actor_solver.prototxt", "Actor solver parameter file (*.prototxt)");
-DEFINE_string(critic_solver, "dqn_critic_solver.prototxt", "Critic solver parameter file (*.prototxt)");
+DEFINE_int32(actor_update_factor, 1, "Number of actor updates per critic update");
+DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
+              "Actor solver parameter file (*.prototxt)");
+DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
+              "Critic solver parameter file (*.prototxt)");
+DEFINE_string(server_cmd,
+              "./scripts/start.py --offense-agents 1 --agent-on-ball --fullstate",
+              "Command executed to start the HFO server.");
+DEFINE_int32(port, -1, "Port to use for server/client.");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -49,8 +58,8 @@ double CalculateEpsilon(const int iter) {
  * Converts a discrete action into a continuous HFO-action
  x*/
 Action GetAction(float kickangle) {
-  CHECK_LT(kickangle, 90);
-  CHECK_GT(kickangle, -90);
+  // CHECK_LT(kickangle, 90);
+  // CHECK_GT(kickangle, -90);
   Action a;
   a = {KICK, 100., kickangle};
   return a;
@@ -61,20 +70,19 @@ Action GetAction(float kickangle) {
  */
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
+  hfo.act({DASH, 0, 0});
   std::deque<dqn::ActorStateDataSp> past_states;
   double total_score;
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
     const std::vector<float>& current_state = hfo.getState();
-    CHECK_EQ(current_state.size(),dqn::kStateDataSize);
+    CHECK_EQ(current_state.size(), dqn::kStateDataSize);
     dqn::ActorStateDataSp current_state_sp = std::make_shared<dqn::ActorStateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kStateInputCount) {
       // If there are not past states enough for DQN input, just select DASH
-      Action a;
-      a = {DASH, 0., 0.};
-      status = hfo.act(a);
+      status = hfo.act({DASH, 0., 0.});
     } else {
       while (past_states.size() > dqn::kStateInputCount) {
         past_states.pop_front();
@@ -84,6 +92,11 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       const float kickangle = dqn.SelectAction(input_states, epsilon);
       Action action = GetAction(kickangle);
       status = hfo.act(action);
+      if (!FLAGS_delay_reward) { // Skip to EOT if not delayed reward
+        while (status == IN_GAME) {
+          status = hfo.act(action);
+        }
+      }
       // Rewards for DQN are normalized as follows:
       // 1 for scoring a goal, -1 for captured by defense, out of bounds, out of time
       // 0 for other middle states
@@ -91,24 +104,31 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       if (status == GOAL) {
         reward = 1;
       } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
-               status == OUT_OF_TIME) {
+                 status == OUT_OF_TIME) {
         reward = -1;
       }
       total_score = reward;
       if (update) {
         // Add the current transition to replay memory
         const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(),dqn::kStateDataSize);
+        CHECK_EQ(next_state.size(), dqn::kStateDataSize);
         dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?
             dqn::Transition(input_states, kickangle, reward, next_state_sp):
             dqn::Transition(input_states, kickangle, reward, boost::none);
+        if (!FLAGS_delay_reward) {
+          CHECK(!std::get<3>(transition)) << "Expected no next state...";
+        }
         dqn.AddTransition(transition);
         // If the size of replay memory is large enough, update DQN
         if (dqn.memory_size() > FLAGS_memory_threshold) {
-          dqn.UpdateCritic();
-          dqn.UpdateActor();
+          for (int i = 0; i < FLAGS_updates_per_action; ++i) {
+            dqn.UpdateCritic();
+            for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
+              dqn.UpdateActor();
+            }
+          }
         }
       }
     }
@@ -181,15 +201,23 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Save path: " << save_path.native();
   if (FLAGS_resume && FLAGS_actor_snapshot.empty()
       && FLAGS_critic_snapshot.empty() && FLAGS_memory_snapshot.empty()) {
-    std::tuple<std::string,std::string,std::string> snapshot =
-        dqn::FindLatestSnapshot(save_path.native());
-    FLAGS_actor_snapshot = std::get<0>(snapshot);
-    FLAGS_critic_snapshot = std::get<1>(snapshot);
-    FLAGS_memory_snapshot = std::get<2>(snapshot);
+    dqn::FindLatestSnapshot(save_path.native(), FLAGS_actor_snapshot,
+                            FLAGS_critic_snapshot, FLAGS_memory_snapshot);
   }
 
+  if (FLAGS_port < 0) {
+    srand(std::hash<std::string>()(save_path.native()));
+    FLAGS_port = rand() % 40000 + 20000;
+  }
+  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
+  if (!FLAGS_gui) { cmd += " --headless"; }
+  if (!FLAGS_evaluate) { cmd += " --no-logging"; }
+  cmd += " &";
+  LOG(INFO) << "Starting server with command: " << cmd;
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+
   HFOEnvironment hfo;
-  hfo.connectToAgentServer(6008);
+  hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
 
   // Get the vector of legal actions
   std::vector<int> legal_actions(dqn::kOutputCount);
@@ -220,19 +248,14 @@ int main(int argc, char** argv) {
     dqn.RestoreSolver(FLAGS_actor_snapshot, FLAGS_critic_snapshot);
     LOG(INFO) << "Loading replay memory from " << FLAGS_memory_snapshot;
     dqn.LoadReplayMemory(FLAGS_memory_snapshot);
-  } else if (!FLAGS_critic_weights.empty() || !FLAGS_actor_weights.empty()) {
+  } else if (!FLAGS_critic_weights.empty() && !FLAGS_actor_weights.empty()) {
     LOG(INFO) << "Actor weights finetuning from " << FLAGS_actor_weights;
     LOG(INFO) << "Critic weights finetuning from " << FLAGS_critic_weights;
     dqn.LoadTrainedModel(FLAGS_actor_weights, FLAGS_critic_weights);
   }
 
   if (FLAGS_evaluate) {
-    if (FLAGS_gui) {
-      auto score = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
-      LOG(INFO) << "Score " << score;
-    } else {
-      Evaluate(hfo, dqn);
-    }
+    Evaluate(hfo, dqn);
     return 0;
   }
 
@@ -247,6 +270,7 @@ int main(int argc, char** argv) {
               << ", iter = " << dqn.current_iteration()
               << ", replay_mem_size = " << dqn.memory_size();
     episode++;
+
     if (dqn.current_iteration() >= last_eval_iter + FLAGS_evaluate_freq) {
       double avg_score = Evaluate(hfo, dqn);
       if (avg_score > best_score) {
@@ -254,7 +278,7 @@ int main(int argc, char** argv) {
                   << " New High Score: " << avg_score;
         best_score = avg_score;
         std::string fname = save_path.native() + "_HiScore" +
-            std::to_string(int(avg_score));
+            std::to_string(avg_score);
         dqn.Snapshot(fname, false, false);
       }
       dqn.Snapshot(save_path.native(), true, true);

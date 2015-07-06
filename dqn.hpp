@@ -13,7 +13,7 @@
 
 namespace dqn {
 
-constexpr auto kStateInputCount = 2;
+constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kOutputCount = 1;
 constexpr auto kStateDataSize = 58;
@@ -163,10 +163,10 @@ protected:
 std::vector<std::string> FilesMatchingRegexp(const std::string& regexp);
 
 /**
- * Removes snapshots starting with snapshot_prefix that have an
- * iteration less than min_iter.
+ * Removes snapshots matching regexp that have an iteration less than
+ * min_iter.
  */
-void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter);
+void RemoveSnapshots(const std::string& regexp, int min_iter);
 
 /**
  * Look for the latest snapshot to resume from. Returns a string
@@ -174,8 +174,10 @@ void RemoveSnapshots(const std::string& snapshot_prefix, int min_iter);
  * none is found. Will only return if the snapshot contains all of:
  * .solverstate,.caffemodel,.replaymemory
  */
-std::tuple<std::string, std::string, std::string> FindLatestSnapshot(
-    const std::string& snapshot_prefix);
+void FindLatestSnapshot(const std::string& snapshot_prefix,
+                        std::string& actor_snapshot,
+                        std::string& critic_snapshot,
+                        std::string& memory_snapshot);
 
 /**
  * Look for the best HiScore matching the given snapshot prefix
