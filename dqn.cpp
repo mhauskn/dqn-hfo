@@ -321,7 +321,7 @@ void DQN::UpdateActor() {
     states_batch.push_back(last_states);
   }
   float start_q = 0;
-  for(int k = 0; k<5; k++) {
+  for(int k = 0; k<100; k++) {
     // Get the actions and q_values from the network
     const std::vector<float> actions =
         SelectActionGreedily(*actor_net_, states_batch);
@@ -336,7 +336,7 @@ void DQN::UpdateActor() {
     const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
     float* q_values_diff = q_values_blob->mutable_cpu_diff();
     // TODO change the parameter value diff_num
-    float diff_num = 10.0;
+    float diff_num = -10.0;
     for (int i = 0; i < kMinibatchSize; i++) {
       q_values_diff[q_values_blob->offset(i,0,0,0)] = diff_num;
     }
@@ -350,7 +350,7 @@ void DQN::UpdateActor() {
     const auto states_blob = critic_target_net_->blob_by_name("states");
     // Set the diff in the actions ouput in Actor network
     for (int i = 0; i < kMinibatchSize; i++) {
-      float d = states_blob->diff_at(i, 0, kMinibatchSize - 1, 0);
+      float d = states_blob->diff_at(i, 0, kCriticInputDataSize - 1, 0);
       data_diff[i] = d;//q_values[i] > 0 ? d : -d;
     }
     LOG(INFO) << "data_diff[0] = " << data_diff[0];
