@@ -42,7 +42,7 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd,
-              "./scripts/start.py --offense-agents 1 --agent-on-ball --fullstate",
+              "./scripts/start.py --offense-agents 1 --agent-on-ball --fullstate --record", 
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 
@@ -52,17 +52,6 @@ double CalculateEpsilon(const int iter) {
   } else {
     return FLAGS_epsilon;
   }
-}
-
-/**
- * Converts a discrete action into a continuous HFO-action
- x*/
-Action GetAction(float kickangle) {
-  // CHECK_LT(kickangle, 90);
-  // CHECK_GT(kickangle, -90);
-  Action a;
-  a = {KICK, 100., kickangle};
-  return a;
 }
 
 /**
@@ -89,8 +78,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       }
       dqn::ActorInputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
-      const float kickangle = dqn.SelectAction(input_states, epsilon);
-      Action action = GetAction(kickangle);
+      const Action action = dqn.SelectAction(input_states, epsilon);
       status = hfo.act(action);
       if (!FLAGS_delay_reward) { // Skip to EOT if not delayed reward
         while (status == IN_GAME) {
@@ -108,29 +96,29 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         reward = -1;
       }
       total_score = reward;
-      if (update) {
-        // Add the current transition to replay memory
-        const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(), dqn::kStateDataSize);
-        dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
-        std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
-        const auto transition = (status == IN_GAME) ?
-            dqn::Transition(input_states, kickangle, reward, next_state_sp):
-            dqn::Transition(input_states, kickangle, reward, boost::none);
-        if (!FLAGS_delay_reward) {
-          CHECK(!std::get<3>(transition)) << "Expected no next state...";
-        }
-        dqn.AddTransition(transition);
-        // If the size of replay memory is large enough, update DQN
-        if (dqn.memory_size() > FLAGS_memory_threshold) {
-          for (int i = 0; i < FLAGS_updates_per_action; ++i) {
-            dqn.UpdateCritic();
-            for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
-              dqn.UpdateActor();
-            }
-          }
-        }
-      }
+      // if (update) {
+      //   // Add the current transition to replay memory
+      //   const std::vector<float>& next_state = hfo.getState();
+      //   CHECK_EQ(next_state.size(), dqn::kStateDataSize);
+      //   dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
+      //   std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
+      //   const auto transition = (status == IN_GAME) ?
+      //       dqn::Transition(input_states, kickangle, reward, next_state_sp):
+      //       dqn::Transition(input_states, kickangle, reward, boost::none);
+      //   if (!FLAGS_delay_reward) {
+      //     CHECK(!std::get<3>(transition)) << "Expected no next state...";
+      //   }
+      //   dqn.AddTransition(transition);
+      //   // If the size of replay memory is large enough, update DQN
+      //   if (dqn.memory_size() > FLAGS_memory_threshold) {
+      //     for (int i = 0; i < FLAGS_updates_per_action; ++i) {
+      //       dqn.UpdateCritic();
+      //       for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
+      //         dqn.UpdateActor();
+      //       }
+      //     }
+      //   }
+      // }
     }
   }
   return total_score;
