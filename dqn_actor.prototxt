@@ -13,9 +13,48 @@ layer {
   }
 }
 layer {
+  name: "action_target_input_layer"
+  type: "MemoryData"
+  top: "action_target"
+  top: "dummy2"
+  memory_data_param {
+    batch_size: 32
+    channels: 4
+    height: 1
+    width: 1
+  }
+}
+layer {
+  name: "actionpara_target_input_layer"
+  type: "MemoryData"
+  top: "actionpara_target"
+  top: "dummy3"
+  memory_data_param {
+    batch_size: 32
+    channels: 6
+    height: 1
+    width: 1
+  }
+}
+layer {
+  name: "filter_input_layer"
+  type: "MemoryData"
+  top: "filter"
+  top: "dummy4"
+  memory_data_param {
+    batch_size: 32
+    channels: 6
+    height: 1
+    width: 1
+  }
+}
+layer {
   name: "silence_layer"
   type: "Silence"
   bottom: "dummy1"
+  bottom: "dummy2"
+  bottom: "dummy3"
+  bottom: "dummy4"
 }
 layer {
   name: "ip1_layer"
@@ -40,15 +79,64 @@ layer {
   }
 }
 layer {
-  name: "ip2_layer"
+  name: "ip2_action_layer"
   type: "InnerProduct"
   bottom: "ip1"
-  top: "kickangle"
+  top: "action"
   inner_product_param {
-    num_output: 1
+    num_output: 4
     weight_filler {
       type: "gaussian"
       std: 0.01
     }
   }
+}
+layer {
+  name: "ip2_actionpara_layer"
+  type: "InnerProduct"
+  bottom: "ip1"
+  top: "actionpara"
+  inner_product_param {
+    num_output: 6
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "filter_reshape"
+  type: "Reshape"
+  bottom: "filter"
+  top: "reshaped_filter"
+  reshape_param {
+    shape {
+      dim: 32
+      dim: 6
+    }
+  }
+}
+layer {
+  name: "eltwise_layer"
+  type: "Eltwise"
+  bottom: "actionpara"
+  bottom: "reshaped_filter"
+  top: "filtered_actionpara"
+  eltwise_param {
+    operation: PROD
+  }
+}
+layer {
+  name: "loss"
+  type: "EuclideanLoss"
+  bottom: "filtered_actionpara"
+  bottom: "actionpara_target"
+  top: "loss"
+}
+layer {
+  name: "softmax_layer"
+  type: ""
+  bottom: "action_target"
+  bottom: "action"
+  top: ""
 }

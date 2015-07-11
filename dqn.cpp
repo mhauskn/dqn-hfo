@@ -189,19 +189,19 @@ std::vector<Action> DQN::SelectActions(const std::vector<ActorInputStates>& stat
                                     const double epsilon) {
   assert(epsilon >= 0.0 && epsilon <= 1.0);
   assert(states_batch.size() <= kMinibatchSize);
-  if (std::uniform_real_distribution<>(0.0, 1.0)(random_engine) < epsilon) {
-    // Select randomly
-    std::vector<float> actions(states_batch.size());
-    for (int i=0; i<actions.size(); ++i) {
-      float kickangle = std::uniform_real_distribution<float>
-          (-90.0, 90.0)(random_engine);
-      actions[i] = kickangle;
-    }
-    return actions;
-  } else {
+  // if (std::uniform_real_distribution<>(0.0, 1.0)(random_engine) < epsilon) {
+  //   // Select randomly
+  //   std::vector<float> actions(states_batch.size());
+  //   for (int i=0; i<actions.size(); ++i) {
+  //     float kickangle = std::uniform_real_distribution<float>
+  //         (-90.0, 90.0)(random_engine);
+  //     actions[i] = kickangle;
+  //   }
+  //   return actions;
+  // } else {
     // Select greedily
-    return SelectActionGreedily(*actor_net_, states_batch);
-  }
+  return SelectActionGreedily(*actor_net_, states_batch);
+  // }
 }
 
 Action DQN::SelectActionGreedily(caffe::Net<float>& net,
@@ -213,28 +213,30 @@ Action DQN::SelectActionGreedily(caffe::Net<float>& net,
 std::vector<Action> DQN::SelectActionGreedily(
     caffe::Net<float>& net,
     const std::vector<ActorInputStates>& last_states_batch) {
-  assert(last_states_batch.size() <= kMinibatchSize);
-  StateLayerInputData states_input;
-  // Input states to the net and compute Q values for each legal actions
-  for (auto i = 0; i < last_states_batch.size(); ++i) {
-    for (auto j = 0; j < kStateInputCount; ++j) {
-      const auto& state_data = last_states_batch[i][j];
-      std::copy(state_data->begin(),
-                state_data->end(),
-                states_input.begin() + i * kActorInputDataSize +
-                j * kStateDataSize);
-    }
-  }
-  InputDataIntoLayers(net, states_input.data(), NULL, NULL);
-  net.ForwardPrefilled(nullptr);
-  // Collect the Results
-  std::vector<float> results(last_states_batch.size());
-  const auto kickangle_blob = net.blob_by_name("kickangle");
-  for (auto i = 0; i < last_states_batch.size(); ++i) {
-    // Get the kickangle from the net
-    results[i] = kickangle_blob->data_at(i, 0, 0, 0);
-  }
-  return results;
+  // assert(last_states_batch.size() <= kMinibatchSize);
+  // StateLayerInputData states_input;
+  // // Input states to the net and compute Q values for each legal actions
+  // for (auto i = 0; i < last_states_batch.size(); ++i) {
+  //   for (auto j = 0; j < kStateInputCount; ++j) {
+  //     const auto& state_data = last_states_batch[i][j];
+  //     std::copy(state_data->begin(),
+  //               state_data->end(),
+  //               states_input.begin() + i * kActorInputDataSize +
+  //               j * kStateDataSize);
+  //   }
+  // }
+  // InputDataIntoLayers(net, states_input.data(), NULL, NULL);
+  // net.ForwardPrefilled(nullptr);
+  // // Collect the Results
+  // std::vector<float> results(last_states_batch.size());
+  // const auto kickangle_blob = net.blob_by_name("kickangle");
+  // for (auto i = 0; i < last_states_batch.size(); ++i) {
+  //   // Get the kickangle from the net
+  //   results[i] = kickangle_blob->data_at(i, 0, 0, 0);
+  // }
+  // return results;
+  std::vector<Action> actions; 
+  return actions;
 }
 
 void DQN::AddTransition(const Transition& transition) {
@@ -333,10 +335,10 @@ void DQN::UpdateActor() {
     states_batch.push_back(last_states);
   }
   // Get the actions and q_values from the network
-  const std::vector<float> actions =
+  const std::vector<Action> actions =
       SelectActionGreedily(*actor_net_, states_batch);
-  const std::vector<float> q_values = GetQValue(
-      *critic_target_net_, states_batch, actions);
+  // const std::vector<float> q_values = GetQValue(
+  //     *critic_target_net_, states_batch, actions);
   const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
   for (int i = 0; i < kMinibatchSize; i++) {
@@ -460,7 +462,7 @@ void DQN::SnapshotReplayMemory(const std::string& filename) {
     const ActorInputStates& states = std::get<0>(t);
     const ActorStateDataSp curr_state = states.back();
     out.write((char*)curr_state->begin(), kStateDataSize * sizeof(float));
-    const float& action = std::get<1>(t);
+    const Action& action = std::get<1>(t);
     out.write((char*)&action, sizeof(float));
     const float& reward = std::get<2>(t);
     out.write((char*)&reward, sizeof(float));
@@ -506,6 +508,125 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     }
   }
   LOG(INFO) << "replay_mem_size = " << memory_size();
+}
+
+void DQN::LoadMimicData(const std::string& filename){
+  LOG(INFO) << "Loading mimic data from mimic_data/" << filename;
+  ClearReplayMemory();
+  std::ifstream ifile(("mimic_data/" + filename).c_str(),std::ios_base::in);
+  if (!ifile.is_open())
+    LOG(INFO) << "Cannot open file mimic_data/" << filename;
+  std::string temp_string;
+  int temp_int;
+  while (!ifile.eof()) {
+    ifile >> temp_int >> temp_int >> temp_string >> temp_string;
+    //    LOG(INFO) << temp_string;
+    if(temp_string == "player_agent.cpp:")
+      std::getline(ifile, temp_string);
+    else {
+      CHECK(temp_string == "GameStatus") << "Not match.";
+      std::getline(ifile, temp_string);
+      break;
+    }
+  }
+  while (!ifile.eof()) {
+    std::deque<dqn::ActorStateDataSp> past_states;
+    for (int i = 0; i < kStateInputCount - 1; ++i) {
+      ifile >> temp_int >> temp_int >> temp_string >> temp_string;
+      CHECK(temp_string == "StateFeatures") << "Not match," << i;
+      ActorStateDataSp statesp = std::make_shared<ActorStateData>();
+      for (int i = 0; i < kStateDataSize; ++i) {
+        ifile >> (*statesp)[i];
+      }
+      past_states.push_back(statesp);
+      std::getline(ifile, temp_string);
+      std::getline(ifile, temp_string);
+      std::getline(ifile, temp_string);
+    }
+    dqn::Transition t;
+    int game_status = 0;
+    while (!ifile.eof()) {
+      ifile >> temp_int >> temp_int >> temp_string >> temp_string;
+      if (temp_string == "GameStatus") {
+        ifile >> game_status;
+        if (game_status == 1) {
+          std::getline(ifile, temp_string);
+          std::getline(ifile, temp_string);
+          std::getline(ifile, temp_string);
+          std::getline(ifile, temp_string);
+          break;
+        }
+      }
+      else if (temp_string == "StateFeatures") {
+        ActorStateDataSp statesp = std::make_shared<ActorStateData>();
+        // std::shared_ptr<ActorStateData> statesp(new dqn::ActorStateData);
+        for (int i = 0; i < kStateDataSize; ++i) {
+          ifile >> (*statesp)[i];
+        }
+        past_states.push_back(statesp);
+        while (past_states.size() > kStateInputCount) {
+          past_states.pop_front();
+        }
+        ActorInputStates& states = std::get<0>(t);
+        std::copy(past_states.begin(), past_states.end(), states.begin());
+      }
+      else if (temp_string == "player_agent.cpp:") {
+        ifile >> temp_string;
+        std::vector<std::string> strs;
+        boost::split(strs,temp_string,boost::is_any_of("(,)"));
+        if (strs[0] == "Dash") {
+          std::get<1>(t) = {DASH, std::stof(strs[1]), std::stof(strs[2])};
+        }
+        else if (strs[0] == "Turn") {
+          std::get<1>(t) = {TURN, std::stof(strs[1])};
+        }
+        else if (strs[0] == "Tackle") {
+          std::get<1>(t) = {TACKLE, std::stof(strs[1])};
+        }
+        else if (strs[0] == "Kick") {
+          std::get<1>(t) = {KICK, std::stof(strs[1]), std::stof(strs[2])};
+        }
+        replay_memory_.push_back(t);
+      }
+      //      LOG(INFO) << temp_string;
+    }
+    //   LOG(INFO) << replay_memory_.size();
+  }
+
+  //  LOG(INFO) << replay_memory_.size();
+
+  // for (int i = 0; i < replay_memory_.size(); ++i) {
+  //   LOG(INFO) << "\nTransition: " << i;
+  //   LOG(INFO) << "PastStates:";
+  //   std::string state = "";
+  //   std::string action;
+  //   for (int j = 0; j < kStateInputCount; ++j) {
+  //     LOG(INFO) << "Frame: " << j;
+  //     for (int k = 0; k < kStateDataSize; ++k) {
+  //       state.append(std::to_string((*(std::get<0>(replay_memory_[i])[j]))[k]));
+  //       state.append(" ");
+  //     }
+  //     LOG(INFO) << state;
+  //     state = "";
+  //     LOG(INFO) << "Action:";
+  //     switch ( std::get<1>(replay_memory_[i]).action) {
+  //       case DASH :
+  //         LOG(INFO) << "DASH " << std::get<1>(replay_memory_[i]).arg1 << " "
+  //                   << std::get<1>(replay_memory_[i]).arg2;
+  //         break;
+  //       case TURN :
+  //         LOG(INFO) << "TURN " << std::get<1>(replay_memory_[i]).arg1;
+  //         break;
+  //       case TACKLE :
+  //         LOG(INFO) << "TACKLE " << std::get<1>(replay_memory_[i]).arg1;
+  //         break;
+  //       case KICK :
+  //         LOG(INFO) << "KICK " << std::get<1>(replay_memory_[i]).arg1 << " "
+  //                   << std::get<1>(replay_memory_[i]).arg2;
+  //         break;
+  //     }
+  //   }
+  // }
 }
 
 }

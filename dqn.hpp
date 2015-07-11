@@ -10,6 +10,7 @@
 #include <caffe/caffe.hpp>
 #include <boost/functional/hash.hpp>
 #include <boost/optional.hpp>
+#include <boost/algorithm/string.hpp>
 
 namespace dqn {
 
@@ -108,6 +109,9 @@ public:
 
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
+
+  // Load mimicing data form a log file
+  void LoadMimicData(const std::string& filename);
 
   // Return the current iteration of the solver
   int current_iteration() const { return critic_solver_->iter(); }
