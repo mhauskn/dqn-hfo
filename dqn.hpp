@@ -16,7 +16,8 @@ namespace dqn {
 
 constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
-constexpr auto kOutputCount = 1;
+constexpr auto kActionCount = 4;
+constexpr auto kActionparaCount = 6;
 constexpr auto kStateDataSize = 58;
 
 constexpr auto kActorInputDataSize = kStateDataSize * kStateInputCount;
@@ -29,11 +30,13 @@ using Transition = std::tuple<ActorInputStates, Action,
                               float, boost::optional<ActorStateDataSp>>;
 
 using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
-using TargetLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
-// using FilterLayerInputData = std::array<float, kMinibatchSize * kOutputCount>;
+using ActionTargetLayerInputData = std::array<int, kMinibatchSize>;
+using ActionparaTargetLayerInputData = std::array<float,
+                                                  kMinibatchSize * kActionparaCount>;
+using FilterLayerInputData = std::array<float, kMinibatchSize * kActionparaCount>;
 
 constexpr auto kCriticInputDataSize = kStateDataSize * kStateInputCount
-    + kOutputCount;
+    + kActionCount;
 constexpr auto kCriticMinibatchDataSize = kCriticInputDataSize * kMinibatchSize;
 
 // using CriticStateData = std::array<float, kCriticInputDataSize>;
@@ -140,7 +143,7 @@ protected:
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
                            float* states_input,
-                           float* action_target_input,
+                           int* action_target_input,
                            float* actionpara_target_input,
                            float* filter_input);
 
@@ -158,7 +161,6 @@ protected:
   SolverSp critic_solver_;
   NetSp critic_net_;  // The critic network used for giving q-value of a continuous action;
   NetSp critic_target_net_; // Clone of critic net. Used to generate targets.
-  TargetLayerInputData dummy_input_data_;
   std::mt19937 random_engine;
 };
 

@@ -215,7 +215,7 @@ int main(int argc, char** argv) {
   hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
 
   // Get the vector of legal actions
-  std::vector<int> legal_actions(dqn::kOutputCount);
+  std::vector<int> legal_actions(dqn::kActionCount);
   std::iota(legal_actions.begin(), legal_actions.end(), 0);
 
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&

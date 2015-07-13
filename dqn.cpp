@@ -171,13 +171,12 @@ void DQN::Initialize() {
   critic_solver_.reset(caffe::GetSolver<float>(critic_solver_param_));
   actor_net_ = actor_solver_->net();
   critic_net_ = critic_solver_->net();
-  std::fill(dummy_input_data_.begin(), dummy_input_data_.end(), 0.0);
   HasBlobSize(*actor_net_, "states",
               {kMinibatchSize,kStateInputCount,kStateDataSize,1});
   // HasBlobSize(*critic_net_, "states",
   //             {kMinibatchSize,kStateInputCount,kStateDataSize,1});
-  HasBlobSize(*critic_net_, "target",
-              {kMinibatchSize,kOutputCount,1,1});
+  // HasBlobSize(*critic_net_, "target",
+  //             {kMinibatchSize,kOutputCount,1,1});
   CloneNet(critic_net_, critic_target_net_);
 }
 
@@ -236,7 +235,7 @@ std::vector<Action> DQN::SelectActionGreedily(
   // Get the action from the net
     action_results[i] = 0;
     float action_value = action_blob->data_at(i, 0, 0, 0);
-    for (int j = 0; j < 4; ++j)
+    for (int j = 0; j < kActionCount; ++j)
       if (action_value < action_blob->data_at(i, j, 0, 0)) {
           action_value = action_blob->data_at(i, j, 0, 0);
           action_results[i] = j;
@@ -341,57 +340,93 @@ void DQN::AddTransition(const Transition& transition) {
 // }
 
 void DQN::UpdateActor() {
-  // Sample transitions from replay memory
-  std::vector<int> transitions;
-  transitions.reserve(kMinibatchSize);
+  StateLayerInputData past_states_batch;
+  ActionTargetLayerInputData target_action_choice_batch;
+  ActionparaTargetLayerInputData target_actionpara_batch;
+  FilterLayerInputData filter_batch;
+  std::fill(past_states_batch.begin(), past_states_batch.end(), 0.0);
+  std::fill(target_action_choice_batch.begin(),
+            target_action_choice_batch.end(), 0);
+  std::fill(target_actionpara_batch.begin(), target_actionpara_batch.end(), 0.0);
+  std::fill(filter_batch.begin(), filter_batch.end(), 0.0);
+  std::vector<Action> target_action_batch(kMinibatchSize);
   for (auto i = 0; i < kMinibatchSize; ++i) {
+    // Sample transitions from replay memory_size
     const auto random_transition_idx =
         std::uniform_int_distribution<int>(0, replay_memory_.size() - 1)(
             random_engine);
-    transitions.push_back(random_transition_idx);
-  }
-  // Compute target values: max_a Q(s',a)
-  std::vector<ActorInputStates> states_batch;
-  for (const auto idx : transitions) {
-    const auto& transition = replay_memory_[idx];
-    // Compute target value
-    ActorInputStates last_states;
-    for (auto i = 0; i < kStateInputCount; ++i) {
-      last_states[i] = std::get<0>(transition)[i];
+    const auto& transition = replay_memory_[random_transition_idx];
+    // fill state input
+    for (auto j = 0; j < kStateInputCount; ++j) {
+      const auto& state_data = std::get<0>(transition)[j];
+      std::copy(state_data->begin(), state_data->end(), past_states_batch.begin() +
+                i * kActorInputDataSize + j * kStateDataSize);
     }
-    states_batch.push_back(last_states);
+    target_action_batch[i] = std::get<1>(transition);
+    //fill action choice
+    const auto& target_action_choice = (int)target_action_batch[i].action;
+    target_action_choice_batch[i] = target_action_choice;
+    //fill actionpara
+    switch (target_action_choice) {
+      case 0:
+        target_actionpara_batch[kActionparaCount * i] = target_action_batch[i].arg1;
+        target_actionpara_batch[kActionparaCount * i + 1] = target_action_batch[i].arg2;
+        filter_batch[kActionparaCount * i] = 1;
+        filter_batch[kActionparaCount * i + 1] = 1;
+        break;
+      case 1:
+        target_actionpara_batch[kActionparaCount * i + 2] = target_action_batch[i].arg1;
+        filter_batch[kActionparaCount * i + 2] = 1;
+        break;
+      case 2:
+        target_actionpara_batch[kActionparaCount * i + 3] = target_action_batch[i].arg1;
+        filter_batch[kActionparaCount * i + 3] = 1;
+        break;
+      case 3:
+        target_actionpara_batch[kActionparaCount * i + 4] = target_action_batch[i].arg1;
+        target_actionpara_batch[kActionparaCount * i + 5] = target_action_batch[i].arg2;
+        filter_batch[kActionparaCount * i + 4] = 1;
+        filter_batch[kActionparaCount * i + 5] = 1;
+        break;
+    }
   }
-  // Get the actions and q_values from the network
-  const std::vector<Action> actions =
-      SelectActionGreedily(*actor_net_, states_batch);
-  // const std::vector<float> q_values = GetQValue(
-  //     *critic_target_net_, states_batch, actions);
-  const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
-  float* q_values_diff = q_values_blob->mutable_cpu_diff();
-  for (int i = 0; i < kMinibatchSize; i++) {
-    q_values_diff[q_values_blob->offset(i,0,0,0)] = -1.0;
-  }
-  // Run the network backwards and get the action diff at the input layer
-  const std::vector<std::string>& names = critic_target_net_->layer_names();
-  int ip2_indx = std::distance(names.begin(),
-                               std::find(names.begin(), names.end(), "ip2_layer"));
-  CHECK_LT(ip2_indx, names.size()) << "[Actor Update] Couldn't find ip2_layer";
-  critic_target_net_->BackwardFrom(ip2_indx);
-  CHECK(critic_target_net_->has_blob("states"));
-  const auto states_blob = critic_target_net_->blob_by_name("states");
-  CHECK(actor_net_->has_blob("kickangle"));
-  const auto kickangle_blob = actor_net_->blob_by_name("kickangle");
-  // Set the diff in the actions ouput in Actor network
-  float* kickangle_diff = kickangle_blob->mutable_cpu_diff();
-  for (int i = 0; i < kMinibatchSize; i++) {
-    kickangle_diff[kickangle_blob->offset(i,0,0,0)] =
-        states_blob->diff_at(i, 0, kCriticInputDataSize-1, 0);
-  }
-  // Run backwards to update the Actor network
-  actor_net_->Backward();
-  actor_solver_->ComputeUpdateValue();
-  actor_solver_->set_iter(actor_solver_->iter() + 1);
-  actor_net_->Update();
+  InputDataIntoLayers(*actor_net_, past_states_batch.data(),
+                      target_action_choice_batch.data(),
+                      target_actionpara_batch.data(),
+                      filter_batch.data());
+  actor_solver_->Step(1);
+
+  // // Get the actions and q_values from the network
+  // const std::vector<Action> actions_batch =
+  //     SelectActionGreedily(*actor_net_, states_batch);
+  // // const std::vector<float> q_values = GetQValue(
+  // //     *critic_target_net_, states_batch, actions);
+  // const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
+  // float* q_values_diff = q_values_blob->mutable_cpu_diff();
+  // for (int i = 0; i < kMinibatchSize; i++) {
+  //   q_values_diff[q_values_blob->offset(i,0,0,0)] = -1.0;
+  // }
+  // // Run the network backwards and get the action diff at the input layer
+  // const std::vector<std::string>& names = critic_target_net_->layer_names();
+  // int ip2_indx = std::distance(names.begin(),
+  //                              std::find(names.begin(), names.end(), "ip2_layer"));
+  // CHECK_LT(ip2_indx, names.size()) << "[Actor Update] Couldn't find ip2_layer";
+  // critic_target_net_->BackwardFrom(ip2_indx);
+  // CHECK(critic_target_net_->has_blob("states"));
+  // const auto states_blob = critic_target_net_->blob_by_name("states");
+  // CHECK(actor_net_->has_blob("kickangle"));
+  // const auto kickangle_blob = actor_net_->blob_by_name("kickangle");
+  // // Set the diff in the actions ouput in Actor network
+  // float* kickangle_diff = kickangle_blob->mutable_cpu_diff();
+  // for (int i = 0; i < kMinibatchSize; i++) {
+  //   kickangle_diff[kickangle_blob->offset(i,0,0,0)] =
+  //       states_blob->diff_at(i, 0, kCriticInputDataSize-1, 0);
+  // }
+  // // Run backwards to update the Actor network
+  // actor_net_->Backward();
+  // actor_solver_->ComputeUpdateValue();
+  // actor_solver_->set_iter(actor_solver_->iter() + 1);
+  // actor_net_->Update();
 }
 
 
@@ -443,7 +478,7 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
 
 void DQN::InputDataIntoLayers(caffe::Net<float>& net,
                               float* states_input,
-                              float* action_target_input,
+                              int* action_target_input,
                               float* actionpara_target_input,
                               float* filter_input) {
   if (states_input != NULL) {
@@ -456,7 +491,7 @@ void DQN::InputDataIntoLayers(caffe::Net<float>& net,
   }
   if (action_target_input != NULL) {
     const auto action_target_input_layer =
-        boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
+        boost::dynamic_pointer_cast<caffe::MemoryDataLayer<int>>(
             net.layer_by_name("action_target_input_layer"));
     CHECK(action_target_input_layer);
     action_target_input_layer->Reset(action_target_input, action_target_input,

@@ -19,7 +19,7 @@ layer {
   top: "dummy2"
   memory_data_param {
     batch_size: 32
-    channels: 4
+    channels: 1
     height: 1
     width: 1
   }
