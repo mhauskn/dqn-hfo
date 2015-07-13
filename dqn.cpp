@@ -213,29 +213,56 @@ Action DQN::SelectActionGreedily(caffe::Net<float>& net,
 std::vector<Action> DQN::SelectActionGreedily(
     caffe::Net<float>& net,
     const std::vector<ActorInputStates>& last_states_batch) {
-  // assert(last_states_batch.size() <= kMinibatchSize);
-  // StateLayerInputData states_input;
-  // // Input states to the net and compute Q values for each legal actions
-  // for (auto i = 0; i < last_states_batch.size(); ++i) {
-  //   for (auto j = 0; j < kStateInputCount; ++j) {
-  //     const auto& state_data = last_states_batch[i][j];
-  //     std::copy(state_data->begin(),
-  //               state_data->end(),
-  //               states_input.begin() + i * kActorInputDataSize +
-  //               j * kStateDataSize);
-  //   }
-  // }
-  // InputDataIntoLayers(net, states_input.data(), NULL, NULL);
-  // net.ForwardPrefilled(nullptr);
-  // // Collect the Results
-  // std::vector<float> results(last_states_batch.size());
-  // const auto kickangle_blob = net.blob_by_name("kickangle");
-  // for (auto i = 0; i < last_states_batch.size(); ++i) {
-  //   // Get the kickangle from the net
-  //   results[i] = kickangle_blob->data_at(i, 0, 0, 0);
-  // }
+  assert(last_states_batch.size() <= kMinibatchSize);
+  StateLayerInputData states_input;
+  // Input states to the net and compute Q values for each legal actions
+  for (auto i = 0; i < last_states_batch.size(); ++i) {
+    for (auto j = 0; j < kStateInputCount; ++j) {
+      const auto& state_data = last_states_batch[i][j];
+      std::copy(state_data->begin(),
+                state_data->end(),
+                states_input.begin() + i * kActorInputDataSize +
+                j * kStateDataSize);
+    }
+  }
+  InputDataIntoLayers(net, states_input.data(), NULL, NULL, NULL);
+  net.ForwardPrefilled(nullptr);
+  // Collect the Results
+  std::vector<int> action_results(last_states_batch.size());
+  std::vector<Action> actions(last_states_batch.size());
+  const auto action_blob = net.blob_by_name("action");
+  const auto actionpara_blob = net.blob_by_name("actionpara");
+  for (int i = 0; i < last_states_batch.size(); ++i) {
+  // Get the action from the net
+    action_results[i] = 0;
+    float action_value = action_blob->data_at(i, 0, 0, 0);
+    for (int j = 0; j < 4; ++j)
+      if (action_value < action_blob->data_at(i, j, 0, 0)) {
+          action_value = action_blob->data_at(i, j, 0, 0);
+          action_results[i] = j;
+        }
+    switch (action_results[i]) {
+      case 0:
+        actions[i].action = DASH;
+        actions[i].arg1 = actionpara_blob->data_at(i, 0, 0, 0);
+        actions[i].arg1 = actionpara_blob->data_at(i, 1, 0, 0);
+        break;
+      case 1:
+        actions[i].action = TURN;
+        actions[i].arg1 = actionpara_blob->data_at(i, 2, 0, 0);
+        break;
+      case 2:
+        actions[i].action = TACKLE;
+        actions[i].arg1 = actionpara_blob->data_at(i, 3, 0, 0);
+        break;
+      case 3:
+        actions[i].action = KICK;
+        actions[i].arg1 = actionpara_blob->data_at(i, 4, 0, 0);
+        actions[i].arg1 = actionpara_blob->data_at(i, 5, 0, 0);
+        break;
+    }
+  }
   // return results;
-  std::vector<Action> actions; 
   return actions;
 }
 
@@ -346,7 +373,8 @@ void DQN::UpdateActor() {
   }
   // Run the network backwards and get the action diff at the input layer
   const std::vector<std::string>& names = critic_target_net_->layer_names();
-  int ip2_indx = std::distance(names.begin(), std::find(names.begin(), names.end(), "ip2_layer"));
+  int ip2_indx = std::distance(names.begin(),
+                               std::find(names.begin(), names.end(), "ip2_layer"));
   CHECK_LT(ip2_indx, names.size()) << "[Actor Update] Couldn't find ip2_layer";
   critic_target_net_->BackwardFrom(ip2_indx);
   CHECK(critic_target_net_->has_blob("states"));
@@ -415,7 +443,8 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
 
 void DQN::InputDataIntoLayers(caffe::Net<float>& net,
                               float* states_input,
-                              float* target_input,
+                              float* action_target_input,
+                              float* actionpara_target_input,
                               float* filter_input) {
   if (states_input != NULL) {
     const auto state_input_layer =
@@ -425,13 +454,22 @@ void DQN::InputDataIntoLayers(caffe::Net<float>& net,
     state_input_layer->Reset(states_input, states_input,
                              state_input_layer->batch_size());
   }
-  if (target_input != NULL) {
-    const auto target_input_layer =
+  if (action_target_input != NULL) {
+    const auto action_target_input_layer =
         boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
-            net.layer_by_name("target_input_layer"));
-    CHECK(target_input_layer);
-    target_input_layer->Reset(target_input, target_input,
-                              target_input_layer->batch_size());
+            net.layer_by_name("action_target_input_layer"));
+    CHECK(action_target_input_layer);
+    action_target_input_layer->Reset(action_target_input, action_target_input,
+                              action_target_input_layer->batch_size());
+  }
+  if (actionpara_target_input != NULL) {
+    const auto actionpara_target_input_layer =
+        boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
+            net.layer_by_name("actionpara_target_input_layer"));
+    CHECK(actionpara_target_input_layer);
+    actionpara_target_input_layer->Reset(actionpara_target_input,
+                                         actionpara_target_input,
+                                         actionpara_target_input_layer->batch_size());
   }
   if (filter_input != NULL) {
     const auto filter_input_layer =

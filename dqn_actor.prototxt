@@ -135,8 +135,8 @@ layer {
 }
 layer {
   name: "softmax_layer"
-  type: ""
-  bottom: "action_target"
+  type: "SoftmaxWithLoss"
   bottom: "action"
-  top: ""
+  bottom: "action_target"
+  top: "softmaxloss"
 }

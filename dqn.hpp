@@ -140,7 +140,8 @@ protected:
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
                            float* states_input,
-                           float* target_input,
+                           float* action_target_input,
+                           float* actionpara_target_input,
                            float* filter_input);
 
 

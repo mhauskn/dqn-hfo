@@ -46,7 +46,7 @@ DEFINE_string(server_cmd,
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 DEFINE_string(mimic_data, "left-11.log", "The mimic state and action data to load (*.log)");
-DEFINE_bool(mimic, false, "Mimic mode: mimic agent2D by training the network with mimic_data");
+DEFINE_bool(mimic, true, "Mimic mode: mimic agent2D by training the network with mimic_data");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -249,11 +249,17 @@ int main(int argc, char** argv) {
     dqn.LoadTrainedModel(FLAGS_actor_weights, FLAGS_critic_weights);
   }
 
-  if (!FLAGS_mimic_data.empty()) {
-    LOG(INFO) << "Loading mimic data into replay memory from mimic_data/" <<
-        FLAGS_mimic_data;
-    dqn.LoadMimicData(FLAGS_mimic_data);
-    LOG(INFO) << "Succesfully load mimic data into replay memory!";
+  if (FLAGS_mimic) {
+    if (!FLAGS_mimic_data.empty()) {
+      LOG(INFO) << "Loading mimic data into replay memory from mimic_data/" <<
+          FLAGS_mimic_data;
+      dqn.LoadMimicData(FLAGS_mimic_data);
+      LOG(INFO) << "Succesfully load mimic data into replay memory!";
+    }
+    else {
+      LOG(INFO) << "Please input mimic_data to load.(using -mimic_data)";
+      return 0;
+    }
   }
 
   if (FLAGS_evaluate) {
