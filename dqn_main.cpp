@@ -16,7 +16,7 @@ using namespace boost::filesystem;
 
 // DQN Parameters
 DEFINE_bool(gpu, true, "Use GPU to brew Caffe");
-DEFINE_bool(gui, false, "Open a GUI window");
+DEFINE_bool(gui, true, "Open a GUI window");
 DEFINE_string(save, "", "Prefix for saving snapshots");
 DEFINE_int32(memory, 400000, "Capacity of replay memory");
 DEFINE_int32(explore, 1000000, "Iterations for epsilon to reach given value.");
@@ -42,9 +42,11 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd,
-              "./scripts/start.py --offense-agents 1 --agent-on-ball --fullstate",
+              "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --record", 
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
+DEFINE_string(mimic_data, "left-11.log", "The mimic state and action data to load (*.log)");
+DEFINE_bool(mimic, true, "Mimic mode: mimic agent2D by training the network with mimic_data");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -55,21 +57,10 @@ double CalculateEpsilon(const int iter) {
 }
 
 /**
- * Converts a discrete action into a continuous HFO-action
- x*/
-Action GetAction(float kickangle) {
-  // CHECK_LT(kickangle, 90);
-  // CHECK_GT(kickangle, -90);
-  Action a;
-  a = {KICK, 100., kickangle};
-  return a;
-}
-
-/**
  * Play one episode and return the total score
  */
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
-                      const bool update) {
+                      const bool update, const bool update_with_input_data) {
   hfo.act({DASH, 0, 0});
   std::deque<dqn::ActorStateDataSp> past_states;
   double total_score;
@@ -89,8 +80,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       }
       dqn::ActorInputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
-      const float kickangle = dqn.SelectAction(input_states, epsilon);
-      Action action = GetAction(kickangle);
+      const Action action = dqn.SelectAction(input_states, epsilon);
       status = hfo.act(action);
       if (!FLAGS_delay_reward) { // Skip to EOT if not delayed reward
         while (status == IN_GAME) {
@@ -108,29 +98,34 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         reward = -1;
       }
       total_score = reward;
-      if (update) {
-        // Add the current transition to replay memory
-        const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(), dqn::kStateDataSize);
-        dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
-        std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
-        const auto transition = (status == IN_GAME) ?
-            dqn::Transition(input_states, kickangle, reward, next_state_sp):
-            dqn::Transition(input_states, kickangle, reward, boost::none);
-        if (!FLAGS_delay_reward) {
-          CHECK(!std::get<3>(transition)) << "Expected no next state...";
-        }
-        dqn.AddTransition(transition);
-        // If the size of replay memory is large enough, update DQN
-        if (dqn.memory_size() > FLAGS_memory_threshold) {
-          for (int i = 0; i < FLAGS_updates_per_action; ++i) {
-            dqn.UpdateCritic();
-            for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
-              dqn.UpdateActor();
-            }
-          }
-        }
-      }
+      // if (update_with_input_data) {
+      //   for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
+      //     dqn.UpdateActor();
+      //   }        dqn.UpdateActor();
+      // }
+      // if (update) {
+      //   // Add the current transition to replay memory
+      //   const std::vector<float>& next_state = hfo.getState();
+      //   CHECK_EQ(next_state.size(), dqn::kStateDataSize);
+      //   dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
+      //   std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
+      //   const auto transition = (status == IN_GAME) ?
+      //       dqn::Transition(input_states, kickangle, reward, next_state_sp):
+      //       dqn::Transition(input_states, kickangle, reward, boost::none);
+      //   if (!FLAGS_delay_reward) {
+      //     CHECK(!std::get<3>(transition)) << "Expected no next state...";
+      //   }
+      //   dqn.AddTransition(transition);
+      //   // If the size of replay memory is large enough, update DQN
+      //   if (dqn.memory_size() > FLAGS_memory_threshold) {
+      //     for (int i = 0; i < FLAGS_updates_per_action; ++i) {
+      //       dqn.UpdateCritic();
+      //       for (int u = 0; u < FLAGS_actor_update_factor; ++u) {
+      //         dqn.UpdateActor();
+      //       }
+      //     }
+      //   }
+      // }
     }
   }
   return total_score;
@@ -142,7 +137,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
 double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   std::vector<double> scores;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    double score = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
+    double score = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false, false);
     scores.push_back(score);
   }
   double total_score = 0.0;
@@ -225,7 +220,7 @@ int main(int argc, char** argv) {
 
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
-      << "Give a snapshot to resume training or weights to finetune "
+      << "Give a snapshot to resume training or weights to finetune " <<
       "but not both.";
 
   // Construct the solver
@@ -254,6 +249,19 @@ int main(int argc, char** argv) {
     dqn.LoadTrainedModel(FLAGS_actor_weights, FLAGS_critic_weights);
   }
 
+  if (FLAGS_mimic) {
+    if (!FLAGS_mimic_data.empty()) {
+      LOG(INFO) << "Loading mimic data into replay memory from mimic_data/" <<
+          FLAGS_mimic_data;
+      dqn.LoadMimicData(FLAGS_mimic_data);
+      LOG(INFO) << "Succesfully load mimic data into replay memory!";
+    }
+    else {
+      LOG(INFO) << "Please input mimic_data to load.(using -mimic_data)";
+      return 0;
+    }
+  }
+
   if (FLAGS_evaluate) {
     Evaluate(hfo, dqn);
     return 0;
@@ -264,7 +272,7 @@ int main(int argc, char** argv) {
   double best_score = std::numeric_limits<double>::min();
   while (dqn.current_iteration() < actor_solver_param.max_iter()) {
     double epsilon = CalculateEpsilon(dqn.current_iteration());
-    double score = PlayOneEpisode(hfo, dqn, epsilon, true);
+    double score = PlayOneEpisode(hfo, dqn, epsilon, true, false);
     LOG(INFO) << "Episode " << episode << " score = " << score
               << ", epsilon = " << epsilon
               << ", iter = " << dqn.current_iteration()
