@@ -10,6 +10,7 @@
 #include <caffe/caffe.hpp>
 #include <boost/functional/hash.hpp>
 #include <boost/optional.hpp>
+#include <boost/algorithm/string.hpp>
 
 namespace dqn {
 
@@ -24,7 +25,7 @@ constexpr auto kActorMinibatchDataSize = kActorInputDataSize * kMinibatchSize;
 using ActorStateData = std::array<float, kStateDataSize>;
 using ActorStateDataSp = std::shared_ptr<ActorStateData>;
 using ActorInputStates = std::array<ActorStateDataSp, kStateInputCount>;
-using Transition = std::tuple<ActorInputStates, float,
+using Transition = std::tuple<ActorInputStates, Action,
                               float, boost::optional<ActorStateDataSp>>;
 
 using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
@@ -82,17 +83,17 @@ public:
                 bool snapshot_memory=true);
 
   // Select an action by epsilon-greedy.
-  float SelectAction(const ActorInputStates& input_states, double epsilon);
+  Action SelectAction(const ActorInputStates& input_states, double epsilon);
 
   // Select a batch of actions by epsilon-greedy.
-  std::vector<float> SelectActions(const std::vector<ActorInputStates>& states_batch,
+  std::vector<Action> SelectActions(const std::vector<ActorInputStates>& states_batch,
                                  double epsilon);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
 
-  // Update DQN using one minibatch
-  void UpdateCritic();
+  // // Update DQN using one minibatch
+  // void UpdateCritic();
 
   // update the actor network
   void UpdateActor();
@@ -109,6 +110,9 @@ public:
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
 
+  // Load mimicing data form a log file
+  void LoadMimicData(const std::string& filename);
+
   // Return the current iteration of the solver
   int current_iteration() const { return critic_solver_->iter(); }
 
@@ -118,30 +122,31 @@ protected:
 
   // Given a set of input states and a network, select an
   // action. Returns the action and the estimated Q-Value.
-  float SelectActionGreedily(caffe::Net<float>& net,
+  Action SelectActionGreedily(caffe::Net<float>& net,
                              const ActorInputStates& last_states);
 
   // Given a batch of input states, return a batch of selected actions + values.
-  std::vector<float> SelectActionGreedily(
+  std::vector<Action> SelectActionGreedily(
       caffe::Net<float>& net,
       const std::vector<ActorInputStates>& last_states);
 
-  // get the Q-Value with the actor parameter
-  std::vector<float> GetQValue(
-      caffe::Net<float>& net,
-      std::vector<ActorInputStates>& last_actor_states_batch,
-      const std::vector<float>& actions);
+  // // get the Q-Value with the actor parameter
+  // std::vector<float> GetQValue(
+  //     caffe::Net<float>& net,
+  //     std::vector<ActorInputStates>& last_actor_states_batch,
+  //     const std::vector<float>& actions);
 
   // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
                            float* states_input,
-                           float* target_input,
+                           float* action_target_input,
+                           float* actionpara_target_input,
                            float* filter_input);
 
 
 protected:
-  const std::vector<int> legal_actions_;
+  const std::vector<int> legal_actions_; // TODO : not used
   const caffe::SolverParameter actor_solver_param_;
   const caffe::SolverParameter critic_solver_param_;
   const int replay_memory_capacity_;
