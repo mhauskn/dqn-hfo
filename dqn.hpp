@@ -30,7 +30,7 @@ using Transition = std::tuple<ActorInputStates, Action,
                               float, boost::optional<ActorStateDataSp>>;
 
 using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
-using ActionTargetLayerInputData = std::array<int, kMinibatchSize>;
+using ActionTargetLayerInputData = std::array<float, kMinibatchSize>;
 using ActionparaTargetLayerInputData = std::array<float,
                                                   kMinibatchSize * kActionparaCount>;
 using FilterLayerInputData = std::array<float, kMinibatchSize * kActionparaCount>;
@@ -143,7 +143,7 @@ protected:
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
                            float* states_input,
-                           int* action_target_input,
+                           float* action_target_input,
                            float* actionpara_target_input,
                            float* filter_input);
 

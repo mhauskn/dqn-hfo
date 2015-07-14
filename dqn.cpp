@@ -346,7 +346,7 @@ void DQN::UpdateActor() {
   FilterLayerInputData filter_batch;
   std::fill(past_states_batch.begin(), past_states_batch.end(), 0.0);
   std::fill(target_action_choice_batch.begin(),
-            target_action_choice_batch.end(), 0);
+            target_action_choice_batch.end(), 0.0);
   std::fill(target_actionpara_batch.begin(), target_actionpara_batch.end(), 0.0);
   std::fill(filter_batch.begin(), filter_batch.end(), 0.0);
   std::vector<Action> target_action_batch(kMinibatchSize);
@@ -364,8 +364,8 @@ void DQN::UpdateActor() {
     }
     target_action_batch[i] = std::get<1>(transition);
     //fill action choice
-    const auto& target_action_choice = (int)target_action_batch[i].action;
-    target_action_choice_batch[i] = target_action_choice;
+    int target_action_choice = (int)target_action_batch[i].action;
+    target_action_choice_batch[i] = (float)target_action_choice;
     //fill actionpara
     switch (target_action_choice) {
       case 0:
@@ -478,7 +478,7 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
 
 void DQN::InputDataIntoLayers(caffe::Net<float>& net,
                               float* states_input,
-                              int* action_target_input,
+                              float* action_target_input,
                               float* actionpara_target_input,
                               float* filter_input) {
   if (states_input != NULL) {
@@ -491,7 +491,7 @@ void DQN::InputDataIntoLayers(caffe::Net<float>& net,
   }
   if (action_target_input != NULL) {
     const auto action_target_input_layer =
-        boost::dynamic_pointer_cast<caffe::MemoryDataLayer<int>>(
+        boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
             net.layer_by_name("action_target_input_layer"));
     CHECK(action_target_input_layer);
     action_target_input_layer->Reset(action_target_input, action_target_input,
