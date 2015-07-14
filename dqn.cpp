@@ -224,7 +224,15 @@ std::vector<Action> DQN::SelectActionGreedily(
                 j * kStateDataSize);
     }
   }
-  InputDataIntoLayers(net, states_input.data(), NULL, NULL, NULL);
+  ActionTargetLayerInputData target_action_choice_batch;
+  ActionparaTargetLayerInputData target_actionpara_batch;
+  FilterLayerInputData filter_batch;
+  std::fill(target_action_choice_batch.begin(),
+            target_action_choice_batch.end(), 0.0);
+  std::fill(target_actionpara_batch.begin(), target_actionpara_batch.end(), 0.0);
+  std::fill(filter_batch.begin(), filter_batch.end(), 0.0);
+  InputDataIntoLayers(net, states_input.data(), target_action_choice_batch.data(),
+                      target_actionpara_batch.data(), filter_batch.data());
   net.ForwardPrefilled(nullptr);
   // Collect the Results
   std::vector<int> action_results(last_states_batch.size());
