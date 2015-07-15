@@ -34,7 +34,7 @@ DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.")
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_bool(delay_reward, true, "If false will skip the timesteps between shooting EOT. ");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
-DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
+DEFINE_int32(evaluate_freq, 2500000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
 DEFINE_int32(actor_update_factor, 1, "Number of actor updates per critic update");
 DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
@@ -42,9 +42,10 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd,
-              "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --record", "Command executed to start the HFO server.");
+              "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --no-logging --headless",
+              "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
-DEFINE_string(mimic_data, "left-11.log", "The mimic state and action data to load (*.log)");
+DEFINE_string(mimic_data, "1.log", "The mimic state and action data to load (*.log)");
 DEFINE_bool(mimic, true, "Mimic mode: mimic agent2D by training the network with mimic_data");
 
 double CalculateEpsilon(const int iter) {
@@ -62,7 +63,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
   hfo.act({DASH, 0, 0});
   std::deque<dqn::ActorStateDataSp> past_states;
-  double total_score;
+  double total_score = 0;
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
     const std::vector<float>& current_state = hfo.getState();
@@ -96,7 +97,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                  status == OUT_OF_TIME) {
         reward = -1;
       }
-      total_score += reward;
+      total_score = reward;
 
       // if (update) {
       //   // Add the current transition to replay memory
@@ -149,14 +150,18 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   return avg_score;
 }
 
-void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn) {
+void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
   LOG(INFO) << "Begin training with mimic data.";
   LOG(INFO) << "The replay memory has " << dqn.memory_size() << " transitions.";
-  for (int i = 0; i < dqn.memory_size(); ++i) {
+  for (int i = 1; i < dqn.memory_size(); ++i) {
     dqn.UpdateActor();
-    LOG(INFO) << "Update " << i << "times.";
-    if (i % 30 == 0) {
+    if (i % 1000 == 0) {
+      LOG(INFO) << "Update " << i << " times.";
+    }
+    if (i % 10000 == 0) {
+      LOG(INFO) << "Evaluate:";
       Evaluate(hfo, dqn);
+      dqn.Snapshot(save_path.native(), false, false);
     }
   }
 }
@@ -262,7 +267,7 @@ int main(int argc, char** argv) {
           FLAGS_mimic_data;
       dqn.LoadMimicData(FLAGS_mimic_data);
       LOG(INFO) << "Successfully load mimic data into replay memory!";
-      TrainMimic(hfo, dqn);
+      TrainMimic(hfo, dqn, save_path);
       LOG(INFO) << "Successfully train the network with mimic data.";
       return 0;
     }
