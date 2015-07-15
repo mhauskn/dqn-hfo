@@ -668,6 +668,9 @@ void DQN::LoadMimicData(const std::string& filename){
           std::get<1>(t) = {KICK, std::stof(strs[1]), std::stof(strs[2])};
         }
         replay_memory_.push_back(t);
+        if (replay_memory_.size() % 100000 == 0) {
+          LOG(INFO) << "Parse " << replay_memory_.size() << " transitions.";
+        }
       }
       //      LOG(INFO) << temp_string;
     }
