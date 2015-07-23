@@ -105,7 +105,7 @@ layer {
   }
 }
 layer {
-  name: "filter_reshape"
+  name: "filter_reshape_layer"
   type: "Reshape"
   bottom: "filter"
   top: "reshaped_filter"
@@ -127,14 +127,14 @@ layer {
   }
 }
 layer {
-  name: "loss"
+  name: "euclidean_loss_layer"
   type: "EuclideanLoss"
   bottom: "filtered_actionpara"
   bottom: "actionpara_target"
-  top: "loss"
+  top: "euclideanloss"
 }
 layer {
-  name: "softmax_layer"
+  name: "softmax_with_loss_layer"
   type: "SoftmaxWithLoss"
   bottom: "action"
   bottom: "action_target"

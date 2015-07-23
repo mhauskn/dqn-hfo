@@ -347,7 +347,7 @@ void DQN::AddTransition(const Transition& transition) {
 //   critic_solver_->Step(1);
 // }
 
-void DQN::UpdateActor() {
+std::pair<float,float> DQN::UpdateActor(int update_idx, bool update) {
   StateLayerInputData past_states_batch;
   ActionTargetLayerInputData target_action_choice_batch;
   ActionparaTargetLayerInputData target_actionpara_batch;
@@ -360,10 +360,7 @@ void DQN::UpdateActor() {
   std::vector<Action> target_action_batch(kMinibatchSize);
   for (auto i = 0; i < kMinibatchSize; ++i) {
     // Sample transitions from replay memory_size
-    const auto random_transition_idx =
-        std::uniform_int_distribution<int>(0, replay_memory_.size() - 1)(
-            random_engine);
-    const auto& transition = replay_memory_[random_transition_idx];
+    const auto& transition = replay_memory_[update_idx * kMinibatchSize + i];
     // fill state input
     for (auto j = 0; j < kStateInputCount; ++j) {
       const auto& state_data = std::get<0>(transition)[j];
@@ -402,7 +399,18 @@ void DQN::UpdateActor() {
                       target_action_choice_batch.data(),
                       target_actionpara_batch.data(),
                       filter_batch.data());
-  actor_solver_->Step(1);
+  if (update == true) {
+      actor_solver_->Step(1);
+      return std::make_pair(0,0);
+  }
+  else {
+    actor_net_->ForwardPrefilled(nullptr);
+    const auto euclideanloss_blob = actor_net_->blob_by_name("euclideanloss");
+    const auto softmaxloss_blob = actor_net_->blob_by_name("softmaxloss");
+    float euclideanloss = euclideanloss_blob->data_at(0, 0, 0, 0);
+    float softmaxloss = softmaxloss_blob->data_at(0, 0, 0, 0);
+    return std::make_pair(euclideanloss, softmaxloss);
+  }
 
   // // Get the actions and q_values from the network
   // const std::vector<Action> actions_batch =

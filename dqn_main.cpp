@@ -45,7 +45,7 @@ DEFINE_string(server_cmd,
               "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --no-logging --headless",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
-DEFINE_string(mimic_data, "1.log", "The mimic state and action data to load (*.log)");
+DEFINE_string(mimic_data, "1.log", "The mimic state-action train data to load (*.log)");
 DEFINE_bool(mimic, true, "Mimic mode: mimic agent2D by training the network with mimic_data");
 
 double CalculateEpsilon(const int iter) {
@@ -153,17 +153,36 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
 void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
   LOG(INFO) << "Begin training with mimic data.";
   LOG(INFO) << "The replay memory has " << dqn.memory_size() << " transitions.";
-  for (int i = 1; i < dqn.memory_size(); ++i) {
-    dqn.UpdateActor();
-    if (i % 1000 == 0) {
-      LOG(INFO) << "Update " << i << " times.";
+  int epochs = -1;
+  while (epochs++ < 10) {
+    LOG(INFO) << "Epoch: " << epochs;
+    float threshold = 0.9 * dqn.memory_size() / dqn::kMinibatchSize;
+    int i = 0;
+    int test_times = 0;
+    float euclideanloss = 0;
+    float softmaxloss = 0;
+    for (; i < threshold; ++i) {
+      dqn.UpdateActor(i, true);
     }
-    if (i % 10000 == 0) {
-      LOG(INFO) << "Evaluate:";
-      Evaluate(hfo, dqn);
-      dqn.Snapshot(save_path.native(), false, false);
+    for (; i < dqn.memory_size() / dqn::kMinibatchSize; ++i) {
+      test_times++;
+      std::pair<float,float> loss = dqn.UpdateActor(i, false);
+      euclideanloss += loss.first;
+      softmaxloss += loss.second;
+      if (test_times % 300 == 0) {
+        euclideanloss = euclideanloss / 300;
+        softmaxloss = softmaxloss / 300;
+        LOG(INFO) << "Test set: iteration "
+                  << (epochs * dqn.memory_size() + i) / dqn::kMinibatchSize;
+        LOG(INFO) << "Loss sum =  " << euclideanloss + softmaxloss;
+        LOG(INFO) << "  Euclideanloss = " << euclideanloss;
+        LOG(INFO) << "  Softmaxloss = " << softmaxloss;
+        euclideanloss = 0;
+        softmaxloss = 0;
+      }
     }
   }
+  dqn.Snapshot(save_path.native(), false, false);
 }
 
 int main(int argc, char** argv) {
@@ -263,8 +282,7 @@ int main(int argc, char** argv) {
 
   if (FLAGS_mimic) {
     if (!FLAGS_mimic_data.empty()) {
-      LOG(INFO) << "Loading mimic data into replay memory from mimic_data/" <<
-          FLAGS_mimic_data;
+      LOG(INFO) << "Loading mimic data into replay memory from mimic_data/";
       dqn.LoadMimicData(FLAGS_mimic_data);
       LOG(INFO) << "Successfully load mimic data into replay memory!";
       TrainMimic(hfo, dqn, save_path);
@@ -272,7 +290,8 @@ int main(int argc, char** argv) {
       return 0;
     }
     else {
-      LOG(INFO) << "Please input mimic_data to load.(using -mimic_data)";
+      LOG(INFO) << "Please ensure mimic_data/" << FLAGS_mimic_data
+                << " are ready to load.";
       return 0;
     }
   }

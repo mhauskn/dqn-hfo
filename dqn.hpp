@@ -99,7 +99,10 @@ public:
   // void UpdateCritic();
 
   // update the actor network
-  void UpdateActor();
+  std::pair<float,float> UpdateActor(int update_idx, bool update);
+
+  // evaluate the actor network performance by loss
+  void EvaluateActor(int evaluate_idx);
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
