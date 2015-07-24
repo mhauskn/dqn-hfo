@@ -153,10 +153,10 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
 void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
   LOG(INFO) << "Begin training with mimic data.";
   LOG(INFO) << "The replay memory has " << dqn.memory_size() << " transitions.";
-  int epochs = -1;
-  while (epochs++ < 10) {
+  int epochs = 0;
+  while (epochs++ < 30) {
     LOG(INFO) << "Epoch: " << epochs;
-    float threshold = 0.9 * dqn.memory_size() / dqn::kMinibatchSize;
+    int threshold = 0.9 * dqn.memory_size() / dqn::kMinibatchSize;
     int i = 0;
     int test_times = 0;
     float euclideanloss = 0;
@@ -169,18 +169,16 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
       std::pair<float,float> loss = dqn.UpdateActor(i, false);
       euclideanloss += loss.first;
       softmaxloss += loss.second;
-      if (test_times % 300 == 0) {
-        euclideanloss = euclideanloss / 300;
-        softmaxloss = softmaxloss / 300;
-        LOG(INFO) << "Test set: iteration "
-                  << (epochs * dqn.memory_size() + i) / dqn::kMinibatchSize;
-        LOG(INFO) << "Loss sum =  " << euclideanloss + softmaxloss;
-        LOG(INFO) << "  Euclideanloss = " << euclideanloss;
-        LOG(INFO) << "  Softmaxloss = " << softmaxloss;
-        euclideanloss = 0;
-        softmaxloss = 0;
-      }
     }
+    euclideanloss = euclideanloss / test_times;
+    softmaxloss = softmaxloss / test_times;
+    LOG(INFO) << "Test set: iteration "
+              << epochs * threshold
+              << ", Loss sum = " << euclideanloss + softmaxloss;
+    LOG(INFO) << "  Euclideanloss = " << euclideanloss;
+    LOG(INFO) << "  Softmaxloss = " << softmaxloss;
+    euclideanloss = 0;
+    softmaxloss = 0;
   }
   dqn.Snapshot(save_path.native(), false, false);
 }
