@@ -347,7 +347,8 @@ void DQN::AddTransition(const Transition& transition) {
 //   critic_solver_->Step(1);
 // }
 
-std::pair<float,float> DQN::UpdateActor(int update_idx, bool update) {
+std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
+                                        std::vector<std::pair<int,int>>& accuracy) {
   StateLayerInputData past_states_batch;
   ActionTargetLayerInputData target_action_choice_batch;
   ActionparaTargetLayerInputData target_actionpara_batch;
@@ -401,16 +402,30 @@ std::pair<float,float> DQN::UpdateActor(int update_idx, bool update) {
                       filter_batch.data());
   if (update == true) {
       actor_solver_->Step(1);
-      return std::make_pair(0,0);
-  }
-  else {
+  }  else {
     actor_net_->ForwardPrefilled(nullptr);
-    const auto euclideanloss_blob = actor_net_->blob_by_name("euclideanloss");
-    const auto softmaxloss_blob = actor_net_->blob_by_name("softmaxloss");
-    float euclideanloss = euclideanloss_blob->data_at(0, 0, 0, 0);
-    float softmaxloss = softmaxloss_blob->data_at(0, 0, 0, 0);
-    return std::make_pair(euclideanloss, softmaxloss);
   }
+
+  const auto action_blob = actor_net_->blob_by_name("action");
+  for (int i = 0; i < kMinibatchSize; ++i) {
+    float action_result = 0;
+    float action_value = action_blob->data_at(i, 0, 0, 0);
+    for (int j = 0; j < kActionCount; ++j)
+      if (action_value < action_blob->data_at(i, j, 0, 0)) {
+          action_value = action_blob->data_at(i, j, 0, 0);
+          action_result = j;
+        }
+    accuracy[(int)target_action_choice_batch[i]].second++;
+    if (action_result == (int)target_action_choice_batch[i])
+      accuracy[(int)target_action_choice_batch[i]].first++;
+  }
+
+  const auto euclideanloss_blob = actor_net_->blob_by_name("euclideanloss");
+  const auto softmaxloss_blob = actor_net_->blob_by_name("softmaxloss");
+  float euclideanloss = euclideanloss_blob->data_at(0, 0, 0, 0);
+  float softmaxloss = softmaxloss_blob->data_at(0, 0, 0, 0);
+  return std::make_pair(euclideanloss, softmaxloss);
+
 
   // // Get the actions and q_values from the network
   // const std::vector<Action> actions_batch =

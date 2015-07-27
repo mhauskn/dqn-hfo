@@ -31,8 +31,7 @@ using Transition = std::tuple<ActorInputStates, Action,
 
 using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
 using ActionTargetLayerInputData = std::array<float, kMinibatchSize>;
-using ActionparaTargetLayerInputData = std::array<float,
-                                                  kMinibatchSize * kActionparaCount>;
+using ActionparaTargetLayerInputData = std::array<float, kMinibatchSize * kActionparaCount>;
 using FilterLayerInputData = std::array<float, kMinibatchSize * kActionparaCount>;
 
 constexpr auto kCriticInputDataSize = kStateDataSize * kStateInputCount
@@ -99,7 +98,8 @@ public:
   // void UpdateCritic();
 
   // update the actor network
-  std::pair<float,float> UpdateActor(int update_idx, bool update);
+  std::pair<float,float> UpdateActor(int update_idx, bool update,
+                                     std::vector<std::pair<int, int>>& accuracy);
 
   // evaluate the actor network performance by loss
   void EvaluateActor(int evaluate_idx);

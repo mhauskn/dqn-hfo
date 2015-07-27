@@ -16,8 +16,9 @@ using namespace boost::filesystem;
 
 // DQN Parameters
 DEFINE_bool(gpu, true, "Use GPU to brew Caffe");
-DEFINE_bool(gui, true, "Open a GUI window");
+DEFINE_bool(gui, false, "Open a GUI window");
 DEFINE_string(save, "state/", "Prefix for saving snapshots");
+DEFINE_int32(epochs, 30, "Epochs for training mimic data");
 DEFINE_int32(memory, 400000, "Capacity of replay memory");
 DEFINE_int32(explore, 1000000, "Iterations for epsilon to reach given value.");
 DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
@@ -42,11 +43,11 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd,
-              "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --no-logging --headless",
+              "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 DEFINE_string(mimic_data, "1.log", "The mimic state-action train data to load (*.log)");
-DEFINE_bool(mimic, true, "Mimic mode: mimic agent2D by training the network with mimic_data");
+DEFINE_bool(mimic, false, "Mimic mode: mimic agent2D by training the network with mimic_data");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -154,19 +155,31 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
   LOG(INFO) << "Begin training with mimic data.";
   LOG(INFO) << "The replay memory has " << dqn.memory_size() << " transitions.";
   int epochs = 0;
-  while (epochs++ < 30) {
+  while (epochs++ < FLAGS_epochs) {
     LOG(INFO) << "Epoch: " << epochs;
     int threshold = 0.9 * dqn.memory_size() / dqn::kMinibatchSize;
     int i = 0;
     int test_times = 0;
     float euclideanloss = 0;
     float softmaxloss = 0;
-    for (; i < threshold; ++i) {
-      dqn.UpdateActor(i, true);
+    std::vector<std::pair<int, int>> accuracy_train, accuracy_test;
+    for (int i = 0; i < 4; ++i) {
+      accuracy_train.push_back(std::make_pair(0,0));
+      accuracy_test.push_back(std::make_pair(0,0));
     }
+    for (; i < threshold; ++i) {
+      dqn.UpdateActor(i, true, accuracy_train);
+    }
+    int accuracy_train_1 = accuracy_train[0].first + accuracy_train[1].first +accuracy_train[2].first + accuracy_train[3].first;
+    int accuracy_train_2 = accuracy_train[0].second + accuracy_train[1].second + accuracy_train[2].second +accuracy_train[3].second;
+    LOG(INFO) << "Training Set: Iteration " << epochs * threshold <<", Accuracy " << accuracy_train_1 / (float)accuracy_train_2 << " (" << accuracy_train_1 << "/" << accuracy_train_2 << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", Dash Accuracy: " << accuracy_train[0].first / (float)accuracy_train[0].second << " (" << accuracy_train[0].first << "/" << accuracy_train[0].second << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", Turn Accuracy: " << accuracy_train[1].first / (float)accuracy_train[1].second << " (" << accuracy_train[1].first << "/" << accuracy_train[1].second << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", Tackle Accuracy: " << accuracy_train[2].first / (float)accuracy_train[2].second << " (" << accuracy_train[2].first << "/" << accuracy_train[2].second << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", Kick Accuracy: "<< accuracy_train[3].first / (float)accuracy_train[3].second << " (" << accuracy_train[3].first << "/" << accuracy_train[3].second << ")";
     for (; i < dqn.memory_size() / dqn::kMinibatchSize; ++i) {
       test_times++;
-      std::pair<float,float> loss = dqn.UpdateActor(i, false);
+      std::pair<float,float> loss = dqn.UpdateActor(i, false, accuracy_test);
       euclideanloss += loss.first;
       softmaxloss += loss.second;
     }
@@ -177,8 +190,14 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
               << ", Loss sum = " << euclideanloss + softmaxloss;
     LOG(INFO) << "  Euclideanloss = " << euclideanloss;
     LOG(INFO) << "  Softmaxloss = " << softmaxloss;
-    euclideanloss = 0;
-    softmaxloss = 0;
+    int accuracy_test_1 = accuracy_test[0].first + accuracy_test[1].first +accuracy_test[2].first + accuracy_test[3].first;
+    int accuracy_test_2 = accuracy_test[0].second + accuracy_test[1].second + accuracy_test[2].second +accuracy_test[3].second;
+    LOG(INFO) << "Test Set: Iteration " << epochs * threshold << ", Accuracy " << accuracy_test_1 / (float)accuracy_test_2 << " (" << accuracy_test_1 << "/" << accuracy_test_2 << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", DASH Accuracy: " << accuracy_test[0].first / (float)accuracy_test[0].second << " (" << accuracy_test[0].first << "/" << accuracy_test[0].second << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", TURN Accuracy: " << accuracy_test[1].first / (float)accuracy_test[1].second << " (" << accuracy_test[1].first << "/" << accuracy_test[1].second << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", TACKLE Accuracy: " << accuracy_test[2].first / (float)accuracy_test[2].second << " (" << accuracy_test[2].first << "/" << accuracy_test[2].second << ")";
+    LOG(INFO) << "  Iteration " << epochs * threshold <<", KICK Accuracy: "<< accuracy_test[3].first / (float)accuracy_test[3].second << " (" << accuracy_test[3].first << "/" << accuracy_test[3].second << ")";
+
   }
   dqn.Snapshot(save_path.native(), false, false);
 }
