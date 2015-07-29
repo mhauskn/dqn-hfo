@@ -26,6 +26,20 @@ void HasBlobSize(caffe::Net<Dtype>& net,
                    expected_shape.begin()));
 }
 
+// Returns the index of the layer matching the given layer_name or -1
+// if no such layer exists.
+template <typename Dtype>
+int GetLayerIndex(caffe::Net<Dtype>& net, const std::string& layer_name) {
+  if (!net.has_layer(layer_name)) {
+    return -1;
+  }
+  const std::vector<std::string>& layer_names = net.layer_names();
+  int indx = std::distance(
+      layer_names.begin(),
+      std::find(layer_names.begin(), layer_names.end(), layer_name));
+  return indx;
+}
+
 int ParseIterFromSnapshot(const std::string& snapshot) {
   unsigned start = snapshot.find_last_of("_");
   unsigned end = snapshot.find_last_of(".");
@@ -312,6 +326,14 @@ void DQN::UpdateCritic() {
 }
 
 void DQN::UpdateActor() {
+  UpdateActor(*critic_net_);
+}
+
+void DQN::UpdateActor(caffe::Net<float>& critic) {
+  CHECK(critic.has_blob("q_values"));
+  CHECK(critic.has_blob("states"));
+  CHECK(actor_net_->has_blob("kickangle"));
+  CHECK(actor_net_->has_layer("ip2_layer"));
   // Sample transitions from replay memory
   std::vector<int> transitions;
   transitions.reserve(kMinibatchSize);
@@ -335,23 +357,20 @@ void DQN::UpdateActor() {
   // Get the actions and q_values from the network
   const std::vector<float> actions =
       SelectActionGreedily(*actor_net_, states_batch);
-  const std::vector<float> q_values = GetQValue(
-      *critic_target_net_, states_batch, actions);
-  const auto q_values_blob = critic_target_net_->blob_by_name("q_values");
+  const std::vector<float> q_values = GetQValue(critic, states_batch, actions);
+  const auto q_values_blob = critic.blob_by_name("q_values");
+  // Set the critic diff to -1 and then backpropagate to actor's input
+  // TODO: Should we use value aside from -1?
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
   for (int i = 0; i < kMinibatchSize; i++) {
     q_values_diff[q_values_blob->offset(i,0,0,0)] = -1.0;
   }
-  // Run the network backwards and get the action diff at the input layer
-  const std::vector<std::string>& names = critic_target_net_->layer_names();
-  int ip2_indx = std::distance(names.begin(), std::find(names.begin(), names.end(), "ip2_layer"));
-  CHECK_LT(ip2_indx, names.size()) << "[Actor Update] Couldn't find ip2_layer";
-  critic_target_net_->BackwardFrom(ip2_indx);
-  CHECK(critic_target_net_->has_blob("states"));
-  const auto states_blob = critic_target_net_->blob_by_name("states");
-  CHECK(actor_net_->has_blob("kickangle"));
+  // Run the network backwards to get the action diff at the input layer
+  int ip2_indx = GetLayerIndex(critic, "ip2_layer");
+  critic.BackwardFrom(ip2_indx);
+  const auto states_blob = critic.blob_by_name("states");
   const auto kickangle_blob = actor_net_->blob_by_name("kickangle");
-  // Set the diff in the actions ouput in Actor network
+  // Set the diff in the actions output in Actor network
   float* kickangle_diff = kickangle_blob->mutable_cpu_diff();
   for (int i = 0; i < kMinibatchSize; i++) {
     kickangle_diff[kickangle_blob->offset(i,0,0,0)] =

@@ -94,8 +94,10 @@ public:
   // Update DQN using one minibatch
   void UpdateCritic();
 
-  // update the actor network
+  // Updates the actor against the critic_net_
   void UpdateActor();
+  // Update the actor network from the gradients provided by the critic
+  void UpdateActor(caffe::Net<float>& critic);
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
