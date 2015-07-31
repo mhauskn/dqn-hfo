@@ -184,8 +184,8 @@ Action DQN::SelectAction(const ActorInputStates& last_states, const double epsil
   return SelectActions(std::vector<ActorInputStates>{{last_states}}, epsilon)[0];
 }
 
-std::vector<Action> DQN::SelectActions(const std::vector<ActorInputStates>& states_batch,
-                                    const double epsilon) {
+std::vector<Action> DQN::SelectActions(const std::vector<ActorInputStates>&
+                                       states_batch, const double epsilon) {
   assert(epsilon >= 0.0 && epsilon <= 1.0);
   assert(states_batch.size() <= kMinibatchSize);
   // if (std::uniform_real_distribution<>(0.0, 1.0)(random_engine) < epsilon) {
@@ -204,7 +204,7 @@ std::vector<Action> DQN::SelectActions(const std::vector<ActorInputStates>& stat
 }
 
 Action DQN::SelectActionGreedily(caffe::Net<float>& net,
-                                      const ActorInputStates& last_states) {
+                                 const ActorInputStates& last_states) {
   return SelectActionGreedily(
       net, std::vector<ActorInputStates>{{last_states}}).front();
 }
@@ -252,7 +252,7 @@ std::vector<Action> DQN::SelectActionGreedily(
       case 0:
         actions[i].action = DASH;
         actions[i].arg1 = actionpara_blob->data_at(i, 0, 0, 0);
-        actions[i].arg1 = actionpara_blob->data_at(i, 1, 0, 0);
+        actions[i].arg2 = actionpara_blob->data_at(i, 1, 0, 0);
         break;
       case 1:
         actions[i].action = TURN;
@@ -265,7 +265,7 @@ std::vector<Action> DQN::SelectActionGreedily(
       case 3:
         actions[i].action = KICK;
         actions[i].arg1 = actionpara_blob->data_at(i, 4, 0, 0);
-        actions[i].arg1 = actionpara_blob->data_at(i, 5, 0, 0);
+        actions[i].arg2 = actionpara_blob->data_at(i, 5, 0, 0);
         break;
     }
   }
@@ -348,7 +348,8 @@ void DQN::AddTransition(const Transition& transition) {
 // }
 
 std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
-                                        std::vector<std::pair<int,int>>& accuracy) {
+                                        std::vector<std::pair<int,int>>& accuracy,
+                                        std::vector<float>& deviation) {
   StateLayerInputData past_states_batch;
   ActionTargetLayerInputData target_action_choice_batch;
   ActionparaTargetLayerInputData target_actionpara_batch;
@@ -407,8 +408,9 @@ std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
   }
 
   const auto action_blob = actor_net_->blob_by_name("action");
+  const auto actionpara_blob = actor_net_->blob_by_name("actionpara");
   for (int i = 0; i < kMinibatchSize; ++i) {
-    float action_result = 0;
+    int action_result = 0;
     float action_value = action_blob->data_at(i, 0, 0, 0);
     for (int j = 0; j < kActionCount; ++j)
       if (action_value < action_blob->data_at(i, j, 0, 0)) {
@@ -416,8 +418,31 @@ std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
           action_result = j;
         }
     accuracy[(int)target_action_choice_batch[i]].second++;
-    if (action_result == (int)target_action_choice_batch[i])
+    if (action_result == (int)target_action_choice_batch[i]) {
+      switch (action_result) {
+        case 0:
+          deviation[0] += std::abs(actionpara_blob->data_at(i, 0, 0, 0) -
+                                 target_actionpara_batch[kActionparaCount * i + 0]);
+          deviation[1] += std::abs(actionpara_blob->data_at(i, 1, 0, 0) -
+                                 target_actionpara_batch[kActionparaCount * i + 1]);
+          break;
+        case 1:
+          deviation[2] += std::abs(actionpara_blob->data_at(i, 2, 0, 0) -
+                                 target_actionpara_batch[kActionparaCount * i + 2]);
+          break;
+        case 2:
+          deviation[3] += std::abs(actionpara_blob->data_at(i, 3, 0, 0) -
+                                 target_actionpara_batch[kActionparaCount * i + 3]);
+          break;
+        case 3:
+          deviation[4] += std::abs(actionpara_blob->data_at(i, 4, 0, 0) -
+                                 target_actionpara_batch[kActionparaCount * i + 4]);
+          deviation[5] += std::abs(actionpara_blob->data_at(i, 5, 0, 0) -
+                                 target_actionpara_batch[kActionparaCount * i + 5]);
+          break;
+      }
       accuracy[(int)target_action_choice_batch[i]].first++;
+    }
   }
 
   const auto euclideanloss_blob = actor_net_->blob_by_name("euclideanloss");
