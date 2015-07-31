@@ -1,5 +1,6 @@
-name: "DQN-Critic-Network"
+name: "Critic"
 force_backward: true
+# debug_info: true
 layer {
   name: "state_input_layer"
   type: "MemoryData"
@@ -8,7 +9,19 @@ layer {
   memory_data_param {
     batch_size: 32
     channels: 1
-    height: 59
+    height: 58
+    width: 1
+  }
+}
+layer {
+  name: "action_input_layer"
+  type: "MemoryData"
+  top: "actions"
+  top: "dummy2"
+  memory_data_param {
+    batch_size: 32
+    channels: 1
+    height: 1
     width: 1
   }
 }
@@ -16,7 +29,7 @@ layer {
   name: "target_input_layer"
   type: "MemoryData"
   top: "target"
-  top: "dummy2"
+  top: "dummy3"
   memory_data_param {
     batch_size: 32
     channels: 1
@@ -29,11 +42,22 @@ layer {
   type: "Silence"
   bottom: "dummy1"
   bottom: "dummy2"
+  bottom: "dummy3"
+}
+layer {
+  name: "concat"
+  bottom: "states"
+  bottom: "actions"
+  top: "state_actions"
+  type: "Concat"
+  concat_param {
+    axis: 2
+  }
 }
 layer {
   name: "ip1_layer"
   type: "InnerProduct"
-  bottom: "states"
+  bottom: "state_actions"
   top: "ip1"
   inner_product_param {
     num_output: 256

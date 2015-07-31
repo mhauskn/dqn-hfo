@@ -37,13 +37,10 @@ DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation 
 DEFINE_int32(evaluate_freq, 250000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
 DEFINE_int32(actor_update_factor, 1, "Number of actor updates per critic update");
-DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
-              "Actor solver parameter file (*.prototxt)");
-DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
-              "Critic solver parameter file (*.prototxt)");
-DEFINE_string(server_cmd,
-              "./scripts/start.py --offense-agents 1 --agent-on-ball --fullstate",
-              "Command executed to start the HFO server.");
+DEFINE_string(actor_solver, "actor_solver.prototxt", "Actor solver (*.prototxt)");
+DEFINE_string(critic_solver, "critic_solver.prototxt", "Critic solver (*.prototxt)");
+DEFINE_string(server_cmd, "./scripts/start.py --offense-agents 1 --fullstate "\
+              "--agent-on-ball", "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 
 double CalculateEpsilon(const int iter) {
@@ -71,13 +68,13 @@ Action GetAction(float kickangle) {
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
   hfo.act({DASH, 0, 0});
-  std::deque<dqn::ActorStateDataSp> past_states;
+  std::deque<dqn::StateDataSp> past_states;
   double total_score;
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
     const std::vector<float>& current_state = hfo.getState();
-    CHECK_EQ(current_state.size(), dqn::kStateDataSize);
-    dqn::ActorStateDataSp current_state_sp = std::make_shared<dqn::ActorStateData>();
+    CHECK_EQ(current_state.size(), dqn::kStateSize);
+    dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kStateInputCount) {
@@ -87,7 +84,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       while (past_states.size() > dqn::kStateInputCount) {
         past_states.pop_front();
       }
-      dqn::ActorInputStates input_states;
+      dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
       const float kickangle = dqn.SelectAction(input_states, epsilon);
       Action action = GetAction(kickangle);
@@ -111,8 +108,8 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       if (update) {
         // Add the current transition to replay memory
         const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(), dqn::kStateDataSize);
-        dqn::ActorStateDataSp next_state_sp = std::make_shared<dqn::ActorStateData>();
+        CHECK_EQ(next_state.size(), dqn::kStateSize);
+        dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?
             dqn::Transition(input_states, kickangle, reward, next_state_sp):
@@ -220,7 +217,7 @@ int main(int argc, char** argv) {
   hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
 
   // Get the vector of legal actions
-  std::vector<int> legal_actions(dqn::kOutputCount);
+  std::vector<int> legal_actions(dqn::kActionSize);
   std::iota(legal_actions.begin(), legal_actions.end(), 0);
 
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&

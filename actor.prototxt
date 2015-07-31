@@ -1,5 +1,6 @@
-name: "DQN-Actor-Network"
+name: "Actor"
 force_backward: true
+# debug_info: true
 layer {
   name: "state_input_layer"
   type: "MemoryData"
@@ -43,7 +44,7 @@ layer {
   name: "ip2_layer"
   type: "InnerProduct"
   bottom: "ip1"
-  top: "kickangle"
+  top: "actions"
   inner_product_param {
     num_output: 1
     weight_filler {
