@@ -505,26 +505,30 @@ void DQN::SnapshotReplayMemory(const std::string& filename) {
   out.push(ofile);
   int num_transitions = memory_size();
   out.write((char*)&num_transitions, sizeof(int));
-  // For the first transition, save the history of states
-  const InputStates& first_transition = std::get<0>(replay_memory_[0]);
-  for (int i = 0; i < kStateInputCount - 1; ++i) {
-    const StateDataSp state = first_transition[i];
-    out.write((char*)state->begin(), kStateSize * sizeof(float));
-  }
-  // For all other transitions, save only the current state
+  int episodes = 0;
+  bool terminal = true;
   for (const Transition& t : replay_memory_) {
     const InputStates& states = std::get<0>(t);
+    if (terminal) { // Save the history of states
+      for (int i = 0; i < kStateInputCount - 1; ++i) {
+        const StateDataSp state = states[i];
+        out.write((char*)state->begin(), kStateSize * sizeof(float));
+      }
+    }
     const StateDataSp curr_state = states.back();
     out.write((char*)curr_state->begin(), kStateSize * sizeof(float));
     const float& action = std::get<1>(t);
     out.write((char*)&action, sizeof(float));
     const float& reward = std::get<2>(t);
     out.write((char*)&reward, sizeof(float));
+    terminal = !std::get<3>(t);
+    out.write((char*)&terminal, sizeof(bool));
+    if (terminal) { episodes++; }
   }
-  LOG(INFO) << "Saved memory of size " << memory_size();
+  LOG(INFO) << "Saved memory of size " << memory_size() << " with "
+            << episodes << " episodes";
 }
 
-// TODO: Need to fix the bug in this method?
 void DQN::LoadReplayMemory(const std::string& filename) {
   LOG(INFO) << "Loading memory from " << filename;
   ClearReplayMemory();
@@ -537,14 +541,18 @@ void DQN::LoadReplayMemory(const std::string& filename) {
   in.read((char*)&num_transitions, sizeof(int));
   replay_memory_.resize(num_transitions);
   std::deque<dqn::StateDataSp> past_states;
-  // First read the state history
-  for (int i = 0; i < kStateInputCount - 1; ++i) {
-    StateDataSp state = std::make_shared<StateData>();
-    in.read((char*)state->begin(), kStateSize * sizeof(float));
-    past_states.push_back(state);
-  }
+  int episodes = 0;
+  bool terminal = true;
   for (int i = 0; i < num_transitions; ++i) {
     Transition& t = replay_memory_[i];
+    if (terminal) {
+      past_states.clear();
+      for (int i = 0; i < kStateInputCount - 1; ++i) {
+        StateDataSp state = std::make_shared<StateData>();
+        in.read((char*)state->begin(), kStateSize * sizeof(float));
+        past_states.push_back(state);
+      }
+    }
     StateDataSp state = std::make_shared<StateData>();
     in.read((char*)state->begin(), kStateSize * sizeof(float));
     past_states.push_back(state);
@@ -556,13 +564,15 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     std::copy(past_states.begin(), past_states.end(), states.begin());
     in.read((char*)&std::get<1>(t), sizeof(float));
     in.read((char*)&std::get<2>(t), sizeof(float));
-    std::get<3>(t) == boost::none;
-    // Set the next state for the last transition
-    if (i > 0) {
+    std::get<3>(t) = boost::none;
+    if (i > 0 && !terminal) { // Set the next state for the last transition
       std::get<3>(replay_memory_[i-1]) = state;
     }
+    in.read((char*)&terminal, sizeof(bool));
+    if (terminal) { episodes++; };
   }
-  LOG(INFO) << "replay_mem_size = " << memory_size();
+  LOG(INFO) << "replay_mem_size = " << memory_size() << " with "
+            << episodes << " episodes";
 }
 
 }
