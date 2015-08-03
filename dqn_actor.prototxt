@@ -57,12 +57,78 @@ layer {
   bottom: "dummy4"
 }
 layer {
-  name: "ip1_layer"
+  name: "ip-1_layer"
   type: "InnerProduct"
   bottom: "states"
+  top: "ip-1"
+  inner_product_param {
+    num_output: 1000
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "ip-1_relu_layer"
+  type: "ReLU"
+  bottom: "ip-1"
+  top: "ip-1"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "ip0_layer"
+  type: "InnerProduct"
+  bottom: "ip-1"
+  top: "ip0"
+  inner_product_param {
+    num_output: 512
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "ip0_relu_layer"
+  type: "ReLU"
+  bottom: "ip0"
+  top: "ip0"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "ip0.5_layer"
+  type: "InnerProduct"
+  bottom: "ip0"
+  top: "ip0.5"
+  inner_product_param {
+    num_output: 200
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "ip0.5_relu_layer"
+  type: "ReLU"
+  bottom: "ip0.5"
+  top: "ip0.5"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "ip1_layer"
+  type: "InnerProduct"
+  bottom: "ip0.5"
   top: "ip1"
   inner_product_param {
-    num_output: 256
+    num_output: 64
     weight_filler {
       type: "gaussian"
       std: 0.01
@@ -105,7 +171,7 @@ layer {
   }
 }
 layer {
-  name: "filter_reshape"
+  name: "filter_reshape_layer"
   type: "Reshape"
   bottom: "filter"
   top: "reshaped_filter"
@@ -127,14 +193,14 @@ layer {
   }
 }
 layer {
-  name: "loss"
+  name: "euclidean_loss_layer"
   type: "EuclideanLoss"
   bottom: "filtered_actionpara"
   bottom: "actionpara_target"
-  top: "loss"
+  top: "euclideanloss"
 }
 layer {
-  name: "softmax_layer"
+  name: "softmax_with_loss_layer"
   type: "SoftmaxWithLoss"
   bottom: "action"
   bottom: "action_target"
