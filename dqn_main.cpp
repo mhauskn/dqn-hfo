@@ -25,6 +25,8 @@ DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network.");
 DEFINE_int32(memory_threshold, 50000, "Number of transitions to start learning");
 DEFINE_int32(updates_per_action, 1, "Updates done after each action taken");
+DEFINE_bool(update_actor, true, "Perform updates on actor.");
+DEFINE_bool(update_critic, true, "Perform updates on critic.");
 DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemodel).");
 DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
@@ -94,8 +96,8 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         dqn.AddTransition(transition);
         if (dqn.memory_size() > FLAGS_memory_threshold) {
           for (int i = 0; i < FLAGS_updates_per_action; ++i) {
-            dqn.UpdateCritic();
-            dqn.UpdateActor();
+            if (FLAGS_update_critic) { dqn.UpdateCritic(); }
+            if (FLAGS_update_actor) { dqn.UpdateActor(); }
           }
         }
       }
