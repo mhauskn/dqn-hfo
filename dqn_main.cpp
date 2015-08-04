@@ -159,7 +159,7 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
     LOG(INFO) << "Epoch: " << epochs;
     int threshold = 0.9 * dqn.memory_size() / dqn::kMinibatchSize;
     int i = 0;
-    int test_times = 0;
+    int test_times = 0, train_times = 0;;
     float euclideanloss = 0;
     float softmaxloss = 0;
     std::vector<std::pair<int, int>> accuracy_train, accuracy_test;
@@ -173,8 +173,20 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
       deviation_test.push_back(0);
     }
     for (; i < threshold; ++i) {
-      dqn.UpdateActor(i, true, accuracy_train, deviation_train);
+      std::pair<float,float> loss = dqn.UpdateActor(i, true, accuracy_train,
+                                                    deviation_train);
+      euclideanloss += loss.first;
+      softmaxloss += loss.second;
     }
+    euclideanloss = euclideanloss / i;
+    softmaxloss = softmaxloss / i;
+    LOG(INFO) <<  "Train set: iteration "
+              << epochs * threshold
+              << ", Loss sum = " << euclideanloss + softmaxloss;
+    LOG(INFO) << "  Euclideanloss = " << euclideanloss;
+    LOG(INFO) << "  Softmaxloss = " << softmaxloss;
+    euclideanloss = 0;
+    softmaxloss = 0;
     int accuracy_train_1 = accuracy_train[0].first + accuracy_train[1].first
         + accuracy_train[2].first + accuracy_train[3].first;
     int accuracy_train_2 = accuracy_train[0].second + accuracy_train[1].second
