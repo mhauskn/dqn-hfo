@@ -15,48 +15,50 @@ namespace dqn {
 
 constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
-constexpr auto kActionSize = 1;
+constexpr auto kActionSize = 4;
+constexpr auto kActionParamSize = 6;
 constexpr auto kStateSize = 58;
 
 constexpr auto kStateInputDataSize = kMinibatchSize * kStateSize * kStateInputCount;
-constexpr auto kActionInputDataSize = kMinibatchSize * kActionSize * kStateInputCount;
+constexpr auto kActionInputDataSize = kMinibatchSize * kActionSize;
+constexpr auto kActionParamsInputDataSize = kMinibatchSize * kActionParamSize;
 constexpr auto kTargetInputDataSize = kMinibatchSize * kActionSize;
 constexpr auto kFilterInputDataSize = kMinibatchSize * kActionSize;
 
 using StateData   = std::array<float, kStateSize>;
 using StateDataSp = std::shared_ptr<StateData>;
 using InputStates = std::array<StateDataSp, kStateInputCount>;
-using Transition  = std::tuple<InputStates, float,
+using Transition  = std::tuple<InputStates, Action,
                                float, boost::optional<StateDataSp>>;
 using ActionValue = std::pair<float, float>;
 using SolverSp    = std::shared_ptr<caffe::Solver<float>>;
 using NetSp       = boost::shared_ptr<caffe::Net<float>>;
 
 // Layer Names
-constexpr auto state_input_layer_name  = "state_input_layer";
-constexpr auto action_input_layer_name = "action_input_layer";
-constexpr auto target_input_layer_name = "target_input_layer";
-constexpr auto filter_input_layer_name = "filter_input_layer";
-constexpr auto q_values_layer_name = "ip2_layer";
+constexpr auto state_input_layer_name         = "state_input_layer";
+constexpr auto action_input_layer_name        = "action_input_layer";
+constexpr auto action_params_input_layer_name = "action_params_input_layer";
+constexpr auto target_input_layer_name        = "target_input_layer";
+constexpr auto filter_input_layer_name        = "filter_input_layer";
+constexpr auto q_values_layer_name            = "q_values_layer";
 // Blob names
-constexpr auto states_blob_name    = "states";
-constexpr auto actions_blob_name   = "actions";
-constexpr auto targets_blob_name   = "target";
-constexpr auto filter_blob_name   = "filter";
-constexpr auto q_values_blob_name = "q_values";
+constexpr auto states_blob_name        = "states";
+constexpr auto actions_blob_name       = "actions";
+constexpr auto action_params_blob_name = "action_params";
+constexpr auto targets_blob_name       = "target";
+constexpr auto filter_blob_name        = "filter";
+constexpr auto q_values_blob_name      = "q_values";
 
 /**
  * Deep Q-Network
  */
 class DQN {
 public:
-  DQN(const std::vector<int>& legal_actions,
-      const caffe::SolverParameter& actor_solver_param,
+  DQN(const caffe::SolverParameter& actor_solver_param,
       const caffe::SolverParameter& critic_solver_param,
       const int replay_memory_capacity,
       const double gamma,
       const int clone_frequency) :
-        legal_actions_(legal_actions),
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(replay_memory_capacity),
@@ -67,13 +69,15 @@ public:
   // Initialize DQN. Must be called before calling any other method.
   void Initialize();
 
-  // Load a trained model from a file.
-  void LoadTrainedModel(const std::string& actor_model_file,
-                        const std::string& critic_model_file);
+  // Benchmark the speed of updates
+  void Benchmark(int iterations=1000);
 
-  // Restore solving from a solver file.
-  void RestoreSolver(const std::string& actor_solver_file,
-                     const std::string& critic_solver_bin);
+  // Loading methods
+  void RestoreActorSolver(const std::string& actor_solver);
+  void RestoreCriticSolver(const std::string& critic_solver);
+  void LoadActorWeights(const std::string& actor_model_file);
+  void LoadCriticWeights(const std::string& critic_weights);
+  void LoadReplayMemory(const std::string& filename);
 
   // Snapshot the model/solver/replay memory. Produces files:
   // snapshot_prefix_iter_N.[caffemodel|solverstate|replaymem]. Optionally
@@ -82,11 +86,14 @@ public:
   void Snapshot(const std::string& snapshot_prefix, bool remove_old=false,
                 bool snapshot_memory=true);
 
+  // Generates a HFO action uniformly at random
+  Action GetRandomHFOAction();
+
   // Select an action using epsilon-greedy action selection.
-  float SelectAction(const InputStates& input_states, double epsilon);
+  Action SelectAction(const InputStates& input_states, double epsilon);
 
   // Select a batch of actions using epsilon-greedy action selection.
-  std::vector<float> SelectActions(const std::vector<InputStates>& states_batch,
+  std::vector<Action> SelectActions(const std::vector<InputStates>& states_batch,
                                    double epsilon);
 
   // Add a transition to replay memory
@@ -106,9 +113,6 @@ public:
   // Save the replay memory to a gzipped compressed file
   void SnapshotReplayMemory(const std::string& filename);
 
-  // Load the replay memory from a gzipped compressed file
-  void LoadReplayMemory(const std::string& filename);
-
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
 
@@ -123,11 +127,11 @@ protected:
   void CloneNet(NetSp& net_from, NetSp& net_to);
 
   // Given input states, use the actor network to select an action.
-  float SelectActionGreedily(caffe::Net<float>& actor,
-                             const InputStates& last_states);
+  Action SelectActionGreedily(caffe::Net<float>& actor,
+                              const InputStates& last_states);
 
   // Given a batch of input states, return a batch of selected actions.
-  std::vector<float> SelectActionGreedily(
+  std::vector<Action> SelectActionGreedily(
       caffe::Net<float>& actor,
       const std::vector<InputStates>& states_batch);
 
@@ -137,19 +141,18 @@ protected:
   // Runs forward on critic to produce q-values.
   std::vector<float> CriticForward(caffe::Net<float>& critic,
                                    std::vector<InputStates>& states_batch,
-                                   const std::vector<float>& action_batch);
+                                   const std::vector<Action>& action_batch);
 
   // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
                            float* states_input,
                            float* actions_input,
+                           float* action_params_input,
                            float* target_input,
                            float* filter_input);
 
-
 protected:
-  const std::vector<int> legal_actions_;
   const caffe::SolverParameter actor_solver_param_;
   const caffe::SolverParameter critic_solver_param_;
   const int replay_memory_capacity_;

@@ -21,7 +21,19 @@ layer {
   memory_data_param {
     batch_size: 32
     channels: 1
-    height: 1
+    height: 4
+    width: 1
+  }
+}
+layer {
+  name: "action_params_input_layer"
+  type: "MemoryData"
+  top: "action_params"
+  top: "dummy3"
+  memory_data_param {
+    batch_size: 32
+    channels: 1
+    height: 6
     width: 1
   }
 }
@@ -29,7 +41,7 @@ layer {
   name: "target_input_layer"
   type: "MemoryData"
   top: "target"
-  top: "dummy3"
+  top: "dummy4"
   memory_data_param {
     batch_size: 32
     channels: 1
@@ -43,11 +55,13 @@ layer {
   bottom: "dummy1"
   bottom: "dummy2"
   bottom: "dummy3"
+  bottom: "dummy4"
 }
 layer {
   name: "concat"
   bottom: "states"
   bottom: "actions"
+  bottom: "action_params"
   top: "state_actions"
   type: "Concat"
   concat_param {
@@ -60,7 +74,7 @@ layer {
   bottom: "state_actions"
   top: "ip1"
   inner_product_param {
-    num_output: 256
+    num_output: 512
     weight_filler {
       type: "gaussian"
       std: 0.05
@@ -84,6 +98,32 @@ layer {
   name: "ip2_layer"
   type: "InnerProduct"
   bottom: "ip1"
+  top: "ip2"
+  inner_product_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.05
+    }
+    bias_filler {
+      type: "constant"
+      value: 1
+    }
+  }
+}
+layer {
+  name: "ip2_relu_layer"
+  type: "ReLU"
+  bottom: "ip2"
+  top: "ip2"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "q_values_layer"
+  type: "InnerProduct"
+  bottom: "ip2"
   top: "q_values"
   inner_product_param {
     num_output: 1
