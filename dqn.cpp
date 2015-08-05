@@ -640,13 +640,14 @@ void DQN::LoadReplayMemory(const std::string& filename) {
 }
 
 void DQN::LoadMimicData(const std::string& filename){
-  LOG(INFO) << "Loading mimic data from mimic_data/" << filename;
+  LOG(INFO) << "Loading mimic data from /scratch/cluster/chen/mimic_data/" << filename;
   ClearReplayMemory();
-  std::ifstream ifile(("mimic_data/" + filename).c_str(),std::ios_base::in);
+  std::ifstream ifile(("/scratch/cluster/chen/mimic_data/" + filename).c_str(),std::ios_base::in);
   if (!ifile.is_open())
-    LOG(INFO) << "Cannot open file mimic_data/" << filename;
+    LOG(INFO) << "Cannot open file /scratch/cluster/chen/mimic_data/" << filename;
   std::string temp_string;
   int temp_int;
+  bool memory_full = false;
   while (!ifile.eof()) {
     ifile >> temp_int >> temp_int >> temp_string >> temp_string;
     //    LOG(INFO) << temp_string;
@@ -658,7 +659,7 @@ void DQN::LoadMimicData(const std::string& filename){
       break;
     }
   }
-  while (!ifile.eof()) {
+  while (!ifile.eof() && !memory_full) {
     std::deque<dqn::ActorStateDataSp> past_states;
     for (int i = 0; i < kStateInputCount - 1; ++i) {
       ifile >> temp_int >> temp_int >> temp_string >> temp_string;
@@ -674,11 +675,13 @@ void DQN::LoadMimicData(const std::string& filename){
     }
     dqn::Transition t;
     int game_status = 0;
-    while (!ifile.eof()) {
+    while (!ifile.eof() && !memory_full) {
       ifile >> temp_int >> temp_int >> temp_string >> temp_string;
       if (temp_string == "GameStatus") {
         ifile >> game_status;
-        if (game_status == 1) {
+        // TODO find a way not to load data with ball catched
+        if (game_status == 1 || game_status == 2 ||
+            game_status == 3 || game_status == 4) {
           std::getline(ifile, temp_string);
           std::getline(ifile, temp_string);
           std::getline(ifile, temp_string);
@@ -718,6 +721,9 @@ void DQN::LoadMimicData(const std::string& filename){
         replay_memory_.push_back(t);
         if (replay_memory_.size() % 100000 == 0) {
           LOG(INFO) << "Parse " << replay_memory_.size() << " transitions.";
+        }
+        if (replay_memory_.size() == replay_memory_capacity_) {
+          memory_full = true;
         }
       }
       //      LOG(INFO) << temp_string;

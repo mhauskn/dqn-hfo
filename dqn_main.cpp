@@ -19,7 +19,7 @@ DEFINE_bool(gpu, true, "Use GPU to brew Caffe");
 DEFINE_bool(gui, false, "Open a GUI window");
 DEFINE_string(save, "state/", "Prefix for saving snapshots");
 DEFINE_int32(epochs, 30, "Epochs for training mimic data");
-DEFINE_int32(memory, 400000, "Capacity of replay memory");
+DEFINE_int32(memory, 1000000, "Capacity of replay memory");
 DEFINE_int32(explore, 1000000, "Iterations for epsilon to reach given value.");
 DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
@@ -46,7 +46,7 @@ DEFINE_string(server_cmd,
               "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --record",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
-DEFINE_string(mimic_data, "1.log", "The mimic state-action train data to load (*.log)");
+DEFINE_string(mimic_data, "1v1/agent.log", "The mimic state-action train data to load (*.log)");
 DEFINE_bool(mimic, false, "Mimic mode: mimic agent2D by training the network with mimic_data");
 
 double CalculateEpsilon(const int iter) {
@@ -159,7 +159,7 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
     LOG(INFO) << "Epoch: " << epochs;
     int threshold = 0.9 * dqn.memory_size() / dqn::kMinibatchSize;
     int i = 0;
-    int test_times = 0, train_times = 0;;
+    int test_times = 0;
     float euclideanloss = 0;
     float softmaxloss = 0;
     std::vector<std::pair<int, int>> accuracy_train, accuracy_test;
@@ -364,7 +364,7 @@ int main(int argc, char** argv) {
 
   if (FLAGS_mimic) {
     if (!FLAGS_mimic_data.empty()) {
-      LOG(INFO) << "Loading mimic data into replay memory from mimic_data/";
+      LOG(INFO) << "Loading mimic data into replay memory from /scratch/cluster/chen/mimic_data/";
       dqn.LoadMimicData(FLAGS_mimic_data);
       LOG(INFO) << "Successfully load mimic data into replay memory!";
       TrainMimic(hfo, dqn, save_path);
@@ -372,8 +372,8 @@ int main(int argc, char** argv) {
       return 0;
     }
     else {
-      LOG(INFO) << "Please ensure mimic_data/" << FLAGS_mimic_data
-                << " are ready to load.";
+      LOG(INFO) << "Please ensure /scratch/cluster/chen/mimic_data/"
+                << FLAGS_mimic_data << " are ready to load.";
       return 0;
     }
   }
