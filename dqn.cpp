@@ -11,8 +11,21 @@
 #include <boost/iostreams/filtering_streambuf.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <glog/logging.h>
+#include <chrono>
 
 namespace dqn {
+
+using namespace hfo;
+
+// DQN Args
+DEFINE_int32(seed, 0, "Seed the RNG. Default: time");
+DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network.");
+DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
+DEFINE_int32(memory, 500000, "Capacity of replay memory");
+DEFINE_int32(memory_threshold, 10000, "Number of transitions to start learning");
+DEFINE_int32(loss_display_iter, 10000, "Frequency of loss display");
+DEFINE_bool(update_actor, true, "Perform updates on actor.");
+DEFINE_bool(update_critic, true, "Perform updates on critic.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -154,6 +167,26 @@ int GetParamOffset(const action_t action, const int arg_num = 0) {
   }
 }
 
+DQN::DQN(const caffe::SolverParameter& actor_solver_param,
+      const caffe::SolverParameter& critic_solver_param) :
+        actor_solver_param_(actor_solver_param),
+        critic_solver_param_(critic_solver_param),
+        replay_memory_capacity_(FLAGS_memory),
+        gamma_(FLAGS_gamma),
+        clone_frequency_(FLAGS_clone_freq),
+        random_engine(),
+        smoothed_loss_(0) {
+  if (FLAGS_seed <= 0) {
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    LOG(INFO) << "Seeding RNG to time (seed = " << seed << ")";
+    random_engine.seed(seed);
+  } else {
+    LOG(INFO) << "Seeding RNG with seed = " << FLAGS_seed;
+    random_engine.seed(FLAGS_seed);
+  }
+  Initialize();
+}
+
 void DQN::Benchmark(int iterations) {
   LOG(INFO) << "*** Benchmark begins ***";
   caffe::Timer critic_timer;
@@ -291,6 +324,7 @@ void DQN::Initialize() {
               {kMinibatchSize, 1, 1, 1});
   HasBlobSize(*critic_net_, q_values_blob_name,
               {kMinibatchSize, 1});
+  // HasBlobSize(*critic_net_, loss_blob_name, {1});
   CHECK(actor_net_->has_layer(state_input_layer_name));
   CHECK(critic_net_->has_layer(state_input_layer_name));
   CHECK(critic_net_->has_layer(action_input_layer_name));
@@ -330,6 +364,12 @@ Action DQN::GetRandomHFOAction() {
 
 Action DQN::SelectAction(const InputStates& last_states, const double epsilon) {
   return SelectActions(std::vector<InputStates>{{last_states}}, epsilon)[0];
+}
+
+float DQN::EvaluateAction(const InputStates& input_states, const Action& action) {
+  return CriticForward(*critic_net_,
+                       std::vector<InputStates>{{input_states}},
+                       std::vector<Action>{{action}})[0];
 }
 
 std::vector<Action> DQN::SelectActions(const std::vector<InputStates>& states_batch,
@@ -400,16 +440,36 @@ void DQN::AddTransition(const Transition& transition) {
   replay_memory_.push_back(transition);
 }
 
-void DQN::UpdateCritic() {
+void DQN::Update() {
+  if (memory_size() < FLAGS_memory_threshold) {
+    return;
+  }
+  if (FLAGS_update_critic) {
+    float loss = UpdateCritic();
+    if (current_iteration() % FLAGS_loss_display_iter == 0) {
+      LOG(INFO) << "Iteration " << current_iteration()
+                << ", loss = " << smoothed_loss_;
+      smoothed_loss_ = 0;
+    }
+    smoothed_loss_ += loss / float(FLAGS_loss_display_iter);
+  }
+  if (FLAGS_update_actor) {
+    UpdateActor();
+  }
+}
+
+float DQN::UpdateCritic() {
   DLOG(INFO) << "[Update] Critic";
   CHECK(critic_net_->has_blob(states_blob_name));
   CHECK(critic_net_->has_blob(actions_blob_name));
   CHECK(critic_net_->has_blob(action_params_blob_name));
   CHECK(critic_net_->has_blob(targets_blob_name));
+  CHECK(critic_net_->has_blob(loss_blob_name));
   const auto states_blob = critic_net_->blob_by_name(states_blob_name);
   const auto action_blob = critic_net_->blob_by_name(actions_blob_name);
   const auto action_params_blob = critic_net_->blob_by_name(action_params_blob_name);
   const auto target_blob = critic_net_->blob_by_name(targets_blob_name);
+  const auto loss_blob = critic_net_->blob_by_name(loss_blob_name);
   // Every clone_iters steps, update the clone_net_ to equal the primary net
   if (current_iteration() % clone_frequency_ == 0) {
     LOG(INFO) << "Iter " << current_iteration() << ": Updating Clone Net";
@@ -464,6 +524,8 @@ void DQN::UpdateCritic() {
                       action_params_input.data(), target_input.data(), NULL);
   DLOG(INFO) << " [Step] Critic";
   critic_solver_->Step(1);
+  // Get the loss
+  return loss_blob->data_at(0,0,0,0);
 }
 
 void DQN::UpdateActor() {
@@ -527,7 +589,7 @@ std::vector<float> DQN::CriticForwardThroughActor(caffe::Net<float>& critic,
 }
 
 std::vector<float> DQN::CriticForward(caffe::Net<float>& critic,
-                                      std::vector<InputStates>& states_batch,
+                                      const std::vector<InputStates>& states_batch,
                                       const std::vector<Action>& action_batch) {
   DLOG(INFO) << "  [Forward] " << critic.name();
   CHECK(critic.has_blob(states_blob_name));

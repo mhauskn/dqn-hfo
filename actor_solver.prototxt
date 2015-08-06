@@ -6,6 +6,6 @@ lr_policy: "step"
 gamma: 0.1
 stepsize: 10000000
 max_iter: 50000000
-display: 10000
+display: 0
 snapshot: 1000000
 # debug_info: true

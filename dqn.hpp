@@ -28,7 +28,7 @@ constexpr auto kFilterInputDataSize = kMinibatchSize * kActionSize;
 using StateData   = std::array<float, kStateSize>;
 using StateDataSp = std::shared_ptr<StateData>;
 using InputStates = std::array<StateDataSp, kStateInputCount>;
-using Transition  = std::tuple<InputStates, Action,
+using Transition  = std::tuple<InputStates, hfo::Action,
                                float, boost::optional<StateDataSp>>;
 using ActionValue = std::pair<float, float>;
 using SolverSp    = std::shared_ptr<caffe::Solver<float>>;
@@ -48,6 +48,7 @@ constexpr auto action_params_blob_name = "action_params";
 constexpr auto targets_blob_name       = "target";
 constexpr auto filter_blob_name        = "filter";
 constexpr auto q_values_blob_name      = "q_values";
+constexpr auto loss_blob_name          = "loss";
 
 /**
  * Deep Q-Network
@@ -55,19 +56,7 @@ constexpr auto q_values_blob_name      = "q_values";
 class DQN {
 public:
   DQN(const caffe::SolverParameter& actor_solver_param,
-      const caffe::SolverParameter& critic_solver_param,
-      const int replay_memory_capacity,
-      const double gamma,
-      const int clone_frequency) :
-        actor_solver_param_(actor_solver_param),
-        critic_solver_param_(critic_solver_param),
-        replay_memory_capacity_(replay_memory_capacity),
-        gamma_(gamma),
-        clone_frequency_(clone_frequency),
-        random_engine(0) {}
-
-  // Initialize DQN. Must be called before calling any other method.
-  void Initialize();
+      const caffe::SolverParameter& critic_solver_param);
 
   // Benchmark the speed of updates
   void Benchmark(int iterations=1000);
@@ -81,31 +70,28 @@ public:
 
   // Snapshot the model/solver/replay memory. Produces files:
   // snapshot_prefix_iter_N.[caffemodel|solverstate|replaymem]. Optionally
-  // removes snapshots that share the same prefix but have a lower
-  // iteration number.
+  // removes snapshots with same prefix but lower iteration.
   void Snapshot(const std::string& snapshot_prefix, bool remove_old=false,
                 bool snapshot_memory=true);
 
   // Generates a HFO action uniformly at random
-  Action GetRandomHFOAction();
+  hfo::Action GetRandomHFOAction();
 
   // Select an action using epsilon-greedy action selection.
-  Action SelectAction(const InputStates& input_states, double epsilon);
+  hfo::Action SelectAction(const InputStates& input_states, double epsilon);
+
+  // Evaluate a state-action, returning the q-value.
+  float EvaluateAction(const InputStates& input_states, const hfo::Action& action);
 
   // Select a batch of actions using epsilon-greedy action selection.
-  std::vector<Action> SelectActions(const std::vector<InputStates>& states_batch,
-                                   double epsilon);
+  std::vector<hfo::Action> SelectActions(const std::vector<InputStates>& states_batch,
+                                         double epsilon);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
 
-  // Update DQN using one minibatch
-  void UpdateCritic();
-
-  // Updates the actor against the critic_net_
-  void UpdateActor();
-  // Update the actor network from the gradients provided by the critic
-  void UpdateActor(caffe::Net<float>& critic);
+  // Update the model(s)
+  void Update();
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
@@ -120,6 +106,16 @@ public:
   int current_iteration() const { return critic_solver_->iter(); }
 
 protected:
+  // Initialize DQN. Called by the constructor
+  void Initialize();
+
+  // Update DQN using one minibatch. Returns the loss.
+  float UpdateCritic();
+  // Updates the actor against the critic_net_
+  void UpdateActor();
+  // Update the actor network from the gradients provided by the critic
+  void UpdateActor(caffe::Net<float>& critic);
+
   // Randomly sample the replay memory n-times, returning transition indexes
   std::vector<int> SampleReplayMemory(int n);
 
@@ -127,11 +123,11 @@ protected:
   void CloneNet(NetSp& net_from, NetSp& net_to);
 
   // Given input states, use the actor network to select an action.
-  Action SelectActionGreedily(caffe::Net<float>& actor,
-                              const InputStates& last_states);
+  hfo::Action SelectActionGreedily(caffe::Net<float>& actor,
+                                   const InputStates& last_states);
 
   // Given a batch of input states, return a batch of selected actions.
-  std::vector<Action> SelectActionGreedily(
+  std::vector<hfo::Action> SelectActionGreedily(
       caffe::Net<float>& actor,
       const std::vector<InputStates>& states_batch);
 
@@ -140,8 +136,8 @@ protected:
                                                std::vector<InputStates>& states_batch);
   // Runs forward on critic to produce q-values.
   std::vector<float> CriticForward(caffe::Net<float>& critic,
-                                   std::vector<InputStates>& states_batch,
-                                   const std::vector<Action>& action_batch);
+                                   const std::vector<InputStates>& states_batch,
+                                   const std::vector<hfo::Action>& action_batch);
 
   // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
@@ -165,6 +161,7 @@ protected:
   NetSp critic_net_;  // The critic network used for giving q-value of a continuous action;
   NetSp critic_target_net_; // Clone of critic net. Used to generate targets.
   std::mt19937 random_engine;
+  float smoothed_loss_;
 };
 
 /**
