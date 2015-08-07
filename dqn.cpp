@@ -446,8 +446,8 @@ void DQN::Update() {
   }
   if (FLAGS_update_critic) {
     float loss = UpdateCritic();
-    if (current_iteration() % FLAGS_loss_display_iter == 0) {
-      LOG(INFO) << "Iteration " << current_iteration()
+    if (critic_iter() % FLAGS_loss_display_iter == 0) {
+      LOG(INFO) << "Critic Iteration " << critic_iter()
                 << ", loss = " << smoothed_loss_;
       smoothed_loss_ = 0;
     }
@@ -471,8 +471,8 @@ float DQN::UpdateCritic() {
   const auto target_blob = critic_net_->blob_by_name(targets_blob_name);
   const auto loss_blob = critic_net_->blob_by_name(loss_blob_name);
   // Every clone_iters steps, update the clone_net_ to equal the primary net
-  if (current_iteration() % clone_frequency_ == 0) {
-    LOG(INFO) << "Iter " << current_iteration() << ": Updating Clone Net";
+  if (critic_iter() % clone_frequency_ == 0) {
+    LOG(INFO) << "Critic Iter " << critic_iter() << ": Updating Clone Net";
     CloneNet(critic_net_, critic_target_net_);
   }
   // Collect a batch of next-states used to generate target_q_values

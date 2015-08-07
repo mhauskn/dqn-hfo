@@ -102,8 +102,10 @@ public:
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
 
-  // Return the current iteration of the solver
-  int current_iteration() const { return critic_solver_->iter(); }
+  // Return the current iteration of the solvers
+  int max_iter() const { return std::max(actor_iter(), critic_iter()); }
+  int critic_iter() const { return critic_solver_->iter(); }
+  int actor_iter() const { return actor_solver_->iter(); }
 
 protected:
   // Initialize DQN. Called by the constructor
