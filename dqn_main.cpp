@@ -33,10 +33,13 @@ DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solversta
 DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory).");
 DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.");
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
+DEFINE_bool(evaluate_with_comparison, false,
+            "Evatluation with Comparation mode: evaluate agent2D, trained agent and handcraft agent");
 DEFINE_bool(delay_reward, true, "If false will skip the timesteps between shooting EOT. ");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 2500000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
+DEFINE_int32(trials, 3, "Number of trials played in evaluation_with_comparison mode");
 DEFINE_int32(actor_update_factor, 1, "Number of actor updates per critic update");
 DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
               "Actor solver parameter file (*.prototxt)");
@@ -45,8 +48,9 @@ DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
 DEFINE_string(server_cmd,
               "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --record",
               "Command executed to start the HFO server.");
-DEFINE_int32(port, -1, "Port to use for server/client.");
-DEFINE_string(mimic_data, "1v1/agent.log", "The mimic state-action train data to load (*.log)");
+DEFINE_int32(port, 6010, "Port to use for server/client.");
+DEFINE_int32(seed, 1, "Seed the trainer's RNG");
+DEFINE_string(mimic_data, "1v0/2.log", "The mimic state-action train data to load (*.log)");
 DEFINE_bool(mimic, false, "Mimic mode: mimic agent2D by training the network with mimic_data");
 
 double CalculateEpsilon(const int iter) {
@@ -60,14 +64,19 @@ double CalculateEpsilon(const int iter) {
 /**
  * Play one episode and return the total score
  */
-double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
+hfo_status_t PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
   hfo.act({DASH, 0, 0});
   std::deque<dqn::ActorStateDataSp> past_states;
   double total_score = 0;
   hfo_status_t status = IN_GAME;
   while (status == IN_GAME) {
-    const std::vector<float>& current_state = hfo.getState();
+    std::vector<float> current_state = hfo.getState();
+    // This is for high-level state state to accustom low-level dqn agent.
+    // For example, it works when you want a 1v0 trained agent to play in a 1v1 game.
+    while (current_state.size() > dqn::kStateDataSize) {
+      current_state.pop_back();
+    }
     CHECK_EQ(current_state.size(), dqn::kStateDataSize);
     dqn::ActorStateDataSp current_state_sp = std::make_shared<dqn::ActorStateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
@@ -88,6 +97,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
           status = hfo.act(action);
         }
       }
+
       // Rewards for DQN are normalized as follows:
       // 1 for scoring a goal, -1 for captured by defense, out of bounds, out of time
       // 0 for other middle states
@@ -98,7 +108,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                  status == OUT_OF_TIME) {
         reward = -1;
       }
-      total_score = reward;
+      total_score += reward;
 
       // if (update) {
       //   // Add the current transition to replay memory
@@ -125,7 +135,8 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       // }
     }
   }
-  return total_score;
+
+  return status;
 }
 
 /**
@@ -133,8 +144,33 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
  */
 double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   std::vector<double> scores;
+  int goal = 0, captured_by_defense = 0, out_of_bounds = 0, out_of_time = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    double score = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
+    hfo_status_t status = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
+    float score = 0;
+    switch (status) {
+      case GOAL:
+        goal += 1;
+        score = 1;
+        // LOG(INFO) << "Episode " << i+1 << ": score = "
+        //           << score << " (goal)";
+        break;
+      case CAPTURED_BY_DEFENSE:
+        captured_by_defense += 1;
+        // LOG(INFO) << "Episode " << i+1 << ": score = "
+        //           << score << " (captured by defense)";
+        break;
+      case OUT_OF_TIME:
+        out_of_time += 1;
+        // LOG(INFO) << "Episode " << i+1 << ": score = "
+        //           << score << " (out of time)";
+        break;
+      case OUT_OF_BOUNDS:
+        out_of_bounds += 1;
+        // LOG(INFO) << "Episode " << i+1 << ": score = "
+        //           << score << " (out of bounds)";
+        break;
+    }
     scores.push_back(score);
   }
   double total_score = 0.0;
@@ -142,13 +178,45 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
     total_score += score;
   }
   const auto avg_score = total_score / static_cast<double>(scores.size());
-  double stddev = 0.0; // Compute the sample standard deviation
-  for (auto i=0; i<scores.size(); ++i) {
-    stddev += (scores[i] - avg_score) * (scores[i] - avg_score);
-  }
-  stddev = sqrt(stddev / static_cast<double>(FLAGS_repeat_games - 1));
-  LOG(INFO) << "Evaluation avg_score = " << avg_score << " std = " << stddev;
+  LOG(INFO) << "Evaluation total_score = " << total_score
+            << " (/" << FLAGS_repeat_games << ")";
+  LOG(INFO) << "Evaluation goal_percentage = " << avg_score;
+  LOG(INFO) << "  goal : " << goal;
+  LOG(INFO) << "  captured_by_defense : " << captured_by_defense;
+  LOG(INFO) << "  out_of_bounds : " << out_of_bounds;
+  LOG(INFO) << "  out_of_time : " << out_of_time;
+  LOG(INFO) << "Evaluation successfully finished!";
   return avg_score;
+}
+
+void Evaluate_With_Comparison(dqn::DQN& dqn) {
+  std::string cmd = "";
+  LOG(INFO) << "Evaluate agent2D : ";
+  for (int i = 0; i < FLAGS_trials; ++i) {
+    std::cout << "Evaluate agent2D trial " << i+1;
+    cmd = "./scripts/start.py --offense-agents 0 --offense-npcs 1 --defense-agents 0 --defense-npcs 0 --port 7010 --headless";
+    cmd += " --trials " + std::to_string(FLAGS_repeat_games);
+    CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+    // cmd += " && ";
+    cmd = "";
+  }
+  LOG(INFO) << "Evaluate our trained agent : ";
+  int port = 8010;
+  for (int i = 0; i < FLAGS_trials; ++i) {
+    //    cmd += "./scripts/start.py --offense-agents 0 --offense-npcs 1 --defense-agents 0 --defense-npcs 0 --port 7010 --headless";
+    //CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+    HFOEnvironment hfo;
+    hfo.connectToAgentServer(port, LOW_LEVEL_FEATURE_SET);
+    port += 100;
+    LOG(INFO) << "Evaluate " << i;
+    Evaluate(hfo,dqn);
+  }
+  LOG(INFO) << "Evaluate handcraft agent : ";
+  cmd = "";
+  for (int i = 0; i < FLAGS_trials; ++i) {
+    cmd += "((./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 &) && ./example/hfo_1v0_handcraft_agent) && ";
+  }
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
 }
 
 void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
@@ -319,7 +387,10 @@ int main(int argc, char** argv) {
   std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_evaluate) { cmd += " --no-logging"; }
-  if (FLAGS_evaluate) { cmd += " --record"; }
+  if (FLAGS_evaluate) {
+    cmd += " --record";
+    cmd += " --seed " + std::to_string(FLAGS_seed);
+  }
   cmd += " &";
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
@@ -379,9 +450,17 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_evaluate) {
+    LOG(INFO) << "Begin to evaluate!";
     Evaluate(hfo, dqn);
     return 0;
   }
+
+  if (FLAGS_evaluate_with_comparison) {
+    LOG(INFO) << "Begin to evaluate with comparison!";
+    Evaluate_With_Comparison(dqn);
+    return 0;
+  }
+
 
   int last_eval_iter = 0;
   int episode = 0;

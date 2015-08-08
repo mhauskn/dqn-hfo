@@ -366,6 +366,7 @@ std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
     // fill state input
     for (auto j = 0; j < kStateInputCount; ++j) {
       const auto& state_data = std::get<0>(transition)[j];
+      CHECK_EQ(state_data->size(),kStateDataSize);
       std::copy(state_data->begin(), state_data->end(), past_states_batch.begin() +
                 i * kActorInputDataSize + j * kStateDataSize);
     }
@@ -395,6 +396,8 @@ std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
         filter_batch[kActionparaCount * i + 4] = 1;
         filter_batch[kActionparaCount * i + 5] = 1;
         break;
+      default:
+        CHECK(0) << "Something wrong with the target action!";
     }
   }
   InputDataIntoLayers(*actor_net_, past_states_batch.data(),
