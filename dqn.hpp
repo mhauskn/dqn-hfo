@@ -80,12 +80,20 @@ public:
   // Select an action using epsilon-greedy action selection.
   hfo::Action SelectAction(const InputStates& input_states, double epsilon);
 
-  // Evaluate a state-action, returning the q-value.
-  float EvaluateAction(const InputStates& input_states, const hfo::Action& action);
-
   // Select a batch of actions using epsilon-greedy action selection.
   std::vector<hfo::Action> SelectActions(const std::vector<InputStates>& states_batch,
                                          double epsilon);
+
+  // Evaluate a state-action, returning the q-value.
+  float EvaluateAction(const InputStates& input_states, const hfo::Action& action);
+
+  // Assess the critic's (ignorant) optimism. Returns the probability
+  // that a random action is better than the actor's suggested action
+  // for the provided states
+  float AssessOptimism(int n_states=32, int n_samples_per_state=32);
+  float AssessOptimism(const InputStates& input_states, int n_samples=32);
+  std::vector<float> AssessOptimism(const std::vector<InputStates>& states_batch,
+                                    int n_samples=32);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
@@ -119,7 +127,9 @@ protected:
   float UpdateActor(caffe::Net<float>& critic);
 
   // Randomly sample the replay memory n-times, returning transition indexes
-  std::vector<int> SampleReplayMemory(int n);
+  std::vector<int> SampleTransitionsFromMemory(int n);
+  // Randomly sample the replay memory n-times returning input_states
+  std::vector<InputStates> SampleStatesFromMemory(int n);
 
   // Clone the network and store the result in clone_net_
   void CloneNet(NetSp& net_from, NetSp& net_to);
@@ -134,8 +144,9 @@ protected:
       const std::vector<InputStates>& states_batch);
 
   // Runs forward on critic to produce q-values. Actions inferred by actor.
-  std::vector<float> CriticForwardThroughActor(caffe::Net<float>& critic,
-                                               std::vector<InputStates>& states_batch);
+  std::vector<float> CriticForwardThroughActor(
+      caffe::Net<float>& critic, const std::vector<InputStates>& states_batch);
+
   // Runs forward on critic to produce q-values.
   std::vector<float> CriticForward(caffe::Net<float>& critic,
                                    const std::vector<InputStates>& states_batch,

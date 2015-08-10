@@ -210,7 +210,7 @@ void DQN::Benchmark(int iterations) {
 }
 
 // Randomly sample the replay memory n times, returning the indexes
-std::vector<int> DQN::SampleReplayMemory(int n) {
+std::vector<int> DQN::SampleTransitionsFromMemory(int n) {
   std::vector<int> transitions(n);
   for (int i = 0; i < n; ++i) {
     transitions[i] =
@@ -218,6 +218,20 @@ std::vector<int> DQN::SampleReplayMemory(int n) {
             random_engine);
   }
   return transitions;
+}
+
+std::vector<InputStates> DQN::SampleStatesFromMemory(int n) {
+  std::vector<InputStates> states_batch(n);
+  std::vector<int> transitions = SampleTransitionsFromMemory(n);
+  for (int i = 0; i < n; ++i) {
+    const auto& transition = replay_memory_[transitions[i]];
+    InputStates last_states;
+    for (int j = 0; j < kStateInputCount; ++j) {
+      last_states[j] = std::get<0>(transition)[j];
+    }
+    states_batch[i] = last_states;
+  }
+  return states_batch;
 }
 
 void DQN::LoadActorWeights(const std::string& actor_weights) {
@@ -457,7 +471,8 @@ void DQN::Update() {
     float loss = UpdateCritic();
     if (critic_iter() % FLAGS_loss_display_iter == 0) {
       LOG(INFO) << "Critic Iteration " << critic_iter()
-                << ", loss = " << smoothed_critic_loss_;
+                << ", loss = " << smoothed_critic_loss_
+                << ", Optimism = " << AssessOptimism();
       smoothed_critic_loss_ = 0;
     }
     smoothed_critic_loss_ += loss / float(FLAGS_loss_display_iter);
@@ -472,6 +487,45 @@ void DQN::Update() {
     smoothed_actor_loss_ += loss / float(FLAGS_loss_display_iter);
   }
 }
+
+float DQN::AssessOptimism(int n_states, int n_samples_per_state) {
+  std::vector<float> results;
+  for (int i=0; i<n_states; ++i) {
+    std::vector<InputStates> states = SampleStatesFromMemory(kMinibatchSize);
+    std::vector<float> opt = AssessOptimism(states, n_samples_per_state);
+    results.insert(results.end(), opt.begin(), opt.end());
+  }
+  return std::accumulate(results.begin(), results.end(), 0.0) / float(results.size());
+}
+
+float DQN::AssessOptimism(const InputStates& input_states, int n_samples) {
+  return AssessOptimism(
+      std::vector<InputStates>{{input_states}}, n_samples).front();
+}
+
+std::vector<float>
+DQN::AssessOptimism(const std::vector<InputStates>& states_batch, int n_samples) {
+  std::vector<float> opt(states_batch.size(), 0.0);
+  // Q-Values for the actions that actor_net_ recommends
+  std::vector<float> actor_q_vals = CriticForwardThroughActor(
+      *critic_net_, states_batch);
+  std::vector<hfo::Action> rand_action_batch(states_batch.size());
+  for (int n=0; n<n_samples; ++n) {
+    for (int i=0; i<states_batch.size(); ++i) {
+      rand_action_batch[i] = GetRandomHFOAction();
+    }
+    // The Q-Values for random actions
+    std::vector<float> rand_q_vals = CriticForward(
+        *critic_net_, states_batch, rand_action_batch);
+    for (int i=0; i<states_batch.size(); ++i) {
+      if (rand_q_vals[i] > actor_q_vals[i]) {
+        opt[i] += 1.0 / float(n_samples);
+      }
+    }
+  }
+  return opt;
+}
+
 
 float DQN::UpdateCritic() {
   DLOG(INFO) << "[Update] Critic";
@@ -491,7 +545,7 @@ float DQN::UpdateCritic() {
     CloneNet(critic_net_, critic_target_net_);
   }
   // Collect a batch of next-states used to generate target_q_values
-  std::vector<int> transitions = SampleReplayMemory(kMinibatchSize);
+  std::vector<int> transitions = SampleTransitionsFromMemory(kMinibatchSize);
   std::vector<InputStates> target_states_batch;
   for (const auto idx : transitions) {
     const auto& transition = replay_memory_[idx];
@@ -566,16 +620,7 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   // Prevent accumulation of actor gradients
   ZeroGradParameters(*actor_net_);
 
-  std::vector<int> transitions = SampleReplayMemory(kMinibatchSize);
-  std::vector<InputStates> states_batch;
-  for (const auto idx : transitions) {
-    const auto& transition = replay_memory_[idx];
-    InputStates last_states;
-    for (int i = 0; i < kStateInputCount; ++i) {
-      last_states[i] = std::get<0>(transition)[i];
-    }
-    states_batch.push_back(last_states);
-  }
+  std::vector<InputStates> states_batch = SampleStatesFromMemory(kMinibatchSize);
   std::vector<float> q_values = CriticForwardThroughActor(critic, states_batch);
 
   // Set the critic diff and run backward
@@ -619,8 +664,8 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   return action_diff;
 }
 
-std::vector<float> DQN::CriticForwardThroughActor(caffe::Net<float>& critic,
-                                                  std::vector<InputStates>& states_batch) {
+std::vector<float> DQN::CriticForwardThroughActor(
+    caffe::Net<float>& critic, const std::vector<InputStates>& states_batch) {
   DLOG(INFO) << " [Forward] " << critic.name() << " Through " << actor_net_->name();
   // Use this to run the actor forward. Don't care about returned actions
   SelectActionGreedily(*actor_net_, states_batch);
