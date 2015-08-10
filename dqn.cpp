@@ -23,7 +23,7 @@ DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(memory, 500000, "Capacity of replay memory");
 DEFINE_int32(memory_threshold, 10000, "Number of transitions to start learning");
-DEFINE_int32(loss_display_iter, 10000, "Frequency of loss display");
+DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_bool(update_actor, true, "Perform updates on actor.");
 DEFINE_bool(update_critic, true, "Perform updates on critic.");
 
@@ -167,15 +167,16 @@ int GetParamOffset(const action_t action, const int arg_num = 0) {
   }
 }
 
-DQN::DQN(const caffe::SolverParameter& actor_solver_param,
-      const caffe::SolverParameter& critic_solver_param) :
+DQN::DQN(caffe::SolverParameter& actor_solver_param,
+         caffe::SolverParameter& critic_solver_param) :
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
         gamma_(FLAGS_gamma),
         clone_frequency_(FLAGS_clone_freq),
         random_engine(),
-        smoothed_loss_(0) {
+        smoothed_critic_loss_(0),
+        smoothed_actor_loss_(0) {
   if (FLAGS_seed <= 0) {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     LOG(INFO) << "Seeding RNG to time (seed = " << seed << ")";
@@ -302,11 +303,19 @@ void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
 }
 
 void DQN::Initialize() {
+#ifndef NDEBUG
+  actor_solver_param_.set_debug_info(true);
+  critic_solver_param_.set_debug_info(true);
+#endif
   // Initialize net and solver
   actor_solver_.reset(caffe::GetSolver<float>(actor_solver_param_));
   critic_solver_.reset(caffe::GetSolver<float>(critic_solver_param_));
   actor_net_ = actor_solver_->net();
   critic_net_ = critic_solver_->net();
+#ifndef NDEBUG
+  actor_net_->set_debug_info(true);
+  critic_net_->set_debug_info(true);
+#endif
   // Check that nets have the necessary layers and blobs
   HasBlobSize(*actor_net_, states_blob_name,
               {kMinibatchSize, kStateInputCount, kStateSize, 1});
@@ -448,13 +457,19 @@ void DQN::Update() {
     float loss = UpdateCritic();
     if (critic_iter() % FLAGS_loss_display_iter == 0) {
       LOG(INFO) << "Critic Iteration " << critic_iter()
-                << ", loss = " << smoothed_loss_;
-      smoothed_loss_ = 0;
+                << ", loss = " << smoothed_critic_loss_;
+      smoothed_critic_loss_ = 0;
     }
-    smoothed_loss_ += loss / float(FLAGS_loss_display_iter);
+    smoothed_critic_loss_ += loss / float(FLAGS_loss_display_iter);
   }
   if (FLAGS_update_actor) {
-    UpdateActor();
+    float loss = UpdateActor();
+    if (actor_iter() % FLAGS_loss_display_iter == 0) {
+      LOG(INFO) << "Actor Iteration " << actor_iter()
+                << ", loss = " << smoothed_actor_loss_;
+      smoothed_actor_loss_ = 0;
+    }
+    smoothed_actor_loss_ += loss / float(FLAGS_loss_display_iter);
   }
 }
 
@@ -505,7 +520,7 @@ float DQN::UpdateCritic() {
     CHECK(reward >= -1.0 && reward <= 1.0);
     const auto target = std::get<3>(transition) ?
         reward + gamma_ * target_q_values[target_value_idx++] : reward;
-    CHECK(!std::isnan(target));
+    CHECK(std::isfinite(target)) << "Target not finite!";
     target_input[target_blob->offset(n,0,0,0)] = target;
     for (int c = 0; c < kStateInputCount; ++c) {
       const auto& state_data = std::get<0>(transition)[c];
@@ -524,15 +539,17 @@ float DQN::UpdateCritic() {
                       action_params_input.data(), target_input.data(), NULL);
   DLOG(INFO) << " [Step] Critic";
   critic_solver_->Step(1);
-  // Get the loss
-  return loss_blob->data_at(0,0,0,0);
+  // Return the loss
+  float loss = loss_blob->data_at(0,0,0,0);
+  CHECK(std::isfinite(loss)) << "Critic loss not finite!";
+  return loss;
 }
 
-void DQN::UpdateActor() {
-  UpdateActor(*critic_net_);
+float DQN::UpdateActor() {
+  return UpdateActor(*critic_net_);
 }
 
-void DQN::UpdateActor(caffe::Net<float>& critic) {
+float DQN::UpdateActor(caffe::Net<float>& critic) {
   DLOG(INFO) << "[Update] Actor";
   CHECK(critic.has_blob(q_values_blob_name));
   CHECK(critic.has_blob(states_blob_name));
@@ -559,7 +576,7 @@ void DQN::UpdateActor(caffe::Net<float>& critic) {
     }
     states_batch.push_back(last_states);
   }
-  CriticForwardThroughActor(critic, states_batch);
+  std::vector<float> q_values = CriticForwardThroughActor(critic, states_batch);
 
   // Set the critic diff and run backward
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
@@ -568,6 +585,13 @@ void DQN::UpdateActor(caffe::Net<float>& critic) {
   }
   DLOG(INFO) << " [Backwards] " << critic.name();
   critic.BackwardFrom(GetLayerIndex(critic, q_values_layer_name));
+
+  float action_diff = critic_actions_blob->asum_diff()
+      / critic_actions_blob->count();
+  // LOG(INFO) << "Critic Action Blob Diff: " << diff_abs_val_mean;
+  float action_param_diff = critic_action_params_blob->asum_diff()
+      / critic_action_params_blob->count();
+  // LOG(INFO) << "Critic Action Params Blob Diff: " << diff_abs_val_mean;
 
   // Transfer input-level diffs from Critic to Actor
   actor_actions_blob->ShareDiff(*critic_actions_blob);
@@ -578,14 +602,71 @@ void DQN::UpdateActor(caffe::Net<float>& critic) {
   actor_solver_->ComputeUpdateValue();
   actor_solver_->set_iter(actor_solver_->iter() + 1);
   actor_net_->Update();
+
+  std::vector<float> new_q_values = CriticForwardThroughActor(critic, states_batch);
+  float avg_q = 0, post_avg_q = 0, avg_q_diff = 0;
+  float sz = float(q_values.size());
+  for (int i=0; i<q_values.size(); ++i) {
+    avg_q += q_values[i] / sz;
+    post_avg_q += new_q_values[i] / sz;
+    avg_q_diff = (new_q_values[i] - q_values[i]) / sz;
+  }
+  VLOG(1) << "Iter " << actor_iter()
+          << ", PreUpdateAvgQ = " << avg_q
+          << ", PostUpdateAvgQ = " << post_avg_q
+          << ", AvgQDiff = " << avg_q_diff;
+
+  return action_diff;
 }
 
 std::vector<float> DQN::CriticForwardThroughActor(caffe::Net<float>& critic,
                                                   std::vector<InputStates>& states_batch) {
   DLOG(INFO) << " [Forward] " << critic.name() << " Through " << actor_net_->name();
-  const std::vector<Action> action_batch =
-      SelectActionGreedily(*actor_net_, states_batch);
-  return CriticForward(critic, states_batch, action_batch);
+  // Use this to run the actor forward. Don't care about returned actions
+  SelectActionGreedily(*actor_net_, states_batch);
+  const auto actor_actions_blob = actor_net_->blob_by_name(actions_blob_name);
+  const auto actor_action_params_blob = actor_net_->blob_by_name(action_params_blob_name);
+  DLOG(INFO) << "  [Forward] " << critic.name();
+  CHECK(critic.has_blob(states_blob_name));
+  CHECK(critic.has_blob(actions_blob_name));
+  CHECK(critic.has_blob(action_params_blob_name));
+  CHECK(critic.has_blob(q_values_blob_name));
+  CHECK_LE(states_batch.size(), kMinibatchSize);
+  const auto states_blob = critic.blob_by_name(states_blob_name);
+  const auto actions_blob = critic.blob_by_name(actions_blob_name);
+  const auto action_params_blob = critic.blob_by_name(action_params_blob_name);
+  std::vector<float> states_input(kStateInputDataSize, 0.0f);
+  std::vector<float> target_input(kTargetInputDataSize, 0.0f);
+  for (int n = 0; n < states_batch.size(); ++n) {
+    for (int c = 0; c < kStateInputCount; ++c) {
+      const auto& state_data = states_batch[n][c];
+      std::copy(state_data->begin(), state_data->end(),
+                states_input.begin() + states_blob->offset(n,c,0,0));
+    }
+  }
+  // Transfer actions + params from actor to critic
+  CHECK(critic.has_layer(action_input_layer_name));
+  const auto action_input_layer =
+      boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
+          critic.layer_by_name(action_input_layer_name));
+  action_input_layer->Reset(actor_actions_blob->mutable_cpu_data(),
+                            actor_actions_blob->mutable_cpu_data(),
+                            action_input_layer->batch_size());
+  CHECK(critic.has_layer(action_params_input_layer_name));
+  const auto action_params_input_layer =
+      boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(
+          critic.layer_by_name(action_params_input_layer_name));
+  action_params_input_layer->Reset(actor_action_params_blob->mutable_cpu_data(),
+                                   actor_action_params_blob->mutable_cpu_data(),
+                                   action_params_input_layer->batch_size());
+  InputDataIntoLayers(critic, states_input.data(), NULL, NULL, target_input.data(), NULL);
+  critic.ForwardPrefilled(nullptr);
+  const auto q_values_blob = critic.blob_by_name(q_values_blob_name);
+  std::vector<float> q_values(states_batch.size());
+  for (int n = 0; n < states_batch.size(); ++n) {
+    q_values[n] = q_values_blob->data_at(n,0,0,0);
+  }
+  return q_values;
 }
 
 std::vector<float> DQN::CriticForward(caffe::Net<float>& critic,
@@ -636,7 +717,9 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
   net_from->ToProto(&net_param);
   net_param.set_name(net_param.name() + "Clone");
   net_param.set_force_backward(true);
-  // net_param.set_debug_info(true);
+#ifndef NDEBUG
+  net_param.set_debug_info(true);
+#endif
   if (!net_to) {
     net_to.reset(new caffe::Net<float>(net_param));
   } else {

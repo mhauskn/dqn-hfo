@@ -55,8 +55,8 @@ constexpr auto loss_blob_name          = "loss";
  */
 class DQN {
 public:
-  DQN(const caffe::SolverParameter& actor_solver_param,
-      const caffe::SolverParameter& critic_solver_param);
+  DQN(caffe::SolverParameter& actor_solver_param,
+      caffe::SolverParameter& critic_solver_param);
 
   // Benchmark the speed of updates
   void Benchmark(int iterations=1000);
@@ -114,9 +114,9 @@ protected:
   // Update DQN using one minibatch. Returns the loss.
   float UpdateCritic();
   // Updates the actor against the critic_net_
-  void UpdateActor();
+  float UpdateActor();
   // Update the actor network from the gradients provided by the critic
-  void UpdateActor(caffe::Net<float>& critic);
+  float UpdateActor(caffe::Net<float>& critic);
 
   // Randomly sample the replay memory n-times, returning transition indexes
   std::vector<int> SampleReplayMemory(int n);
@@ -151,8 +151,8 @@ protected:
                            float* filter_input);
 
 protected:
-  const caffe::SolverParameter actor_solver_param_;
-  const caffe::SolverParameter critic_solver_param_;
+  caffe::SolverParameter actor_solver_param_;
+  caffe::SolverParameter critic_solver_param_;
   const int replay_memory_capacity_;
   const double gamma_;
   const int clone_frequency_; // How often (steps) the clone_net is updated
@@ -163,7 +163,7 @@ protected:
   NetSp critic_net_;  // The critic network used for giving q-value of a continuous action;
   NetSp critic_target_net_; // Clone of critic net. Used to generate targets.
   std::mt19937 random_engine;
-  float smoothed_loss_;
+  float smoothed_critic_loss_, smoothed_actor_loss_;
 };
 
 /**
