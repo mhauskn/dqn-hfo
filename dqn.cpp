@@ -347,9 +347,10 @@ void DQN::AddTransition(const Transition& transition) {
 //   critic_solver_->Step(1);
 // }
 
-std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
-                                        std::vector<std::pair<int,int>>& accuracy,
-                                        std::vector<float>& deviation) {
+void DQN::UpdateActor(int update_idx, bool update,
+                      std::vector<std::pair<int,int>>& accuracy,
+                      std::vector<float>& deviation,
+                      std::pair<float,float>& loss) {
   StateLayerInputData past_states_batch;
   ActionTargetLayerInputData target_action_choice_batch;
   ActionparaTargetLayerInputData target_actionpara_batch;
@@ -452,7 +453,7 @@ std::pair<float,float> DQN::UpdateActor(int update_idx, bool update,
   const auto softmaxloss_blob = actor_net_->blob_by_name("softmaxloss");
   float euclideanloss = euclideanloss_blob->data_at(0, 0, 0, 0);
   float softmaxloss = softmaxloss_blob->data_at(0, 0, 0, 0);
-  return std::make_pair(euclideanloss, softmaxloss);
+  loss = std::make_pair(euclideanloss, softmaxloss);
 
 
   // // Get the actions and q_values from the network

@@ -39,7 +39,7 @@ DEFINE_bool(delay_reward, true, "If false will skip the timesteps between shooti
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 2500000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
-DEFINE_int32(trials, 3, "Number of trials played in evaluation_with_comparison mode");
+DEFINE_int32(trials, 10, "Number of trials played in evaluation_with_comparison mode");
 DEFINE_int32(actor_update_factor, 1, "Number of actor updates per critic update");
 DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
               "Actor solver parameter file (*.prototxt)");
@@ -65,12 +65,14 @@ double CalculateEpsilon(const int iter) {
  * Play one episode and return the total score
  */
 hfo_status_t PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
-                      const bool update) {
+                            const bool update, int& frames) {
   hfo.act({DASH, 0, 0});
   std::deque<dqn::ActorStateDataSp> past_states;
   double total_score = 0;
   hfo_status_t status = IN_GAME;
+  frames = 0;
   while (status == IN_GAME) {
+    frames++;
     std::vector<float> current_state = hfo.getState();
     // This is for high-level state state to accustom low-level dqn agent.
     // For example, it works when you want a 1v0 trained agent to play in a 1v1 game.
@@ -145,8 +147,10 @@ hfo_status_t PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double eps
 double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   std::vector<double> scores;
   int goal = 0, captured_by_defense = 0, out_of_bounds = 0, out_of_time = 0;
+  std::vector<int> frames(FLAGS_repeat_games);
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    hfo_status_t status = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
+    hfo_status_t status = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon,
+                                         false, frames[i]);
     float score = 0;
     switch (status) {
       case GOAL:
@@ -172,12 +176,27 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
         break;
     }
     scores.push_back(score);
+    LOG(INFO) << "frame = " << frames[i];
   }
+  // Calculating the score avg
   double total_score = 0.0;
   for (auto score : scores) {
     total_score += score;
   }
   const auto avg_score = total_score / static_cast<double>(scores.size());
+
+  // Calculating the frame avg and std
+  int total_frame = 0.0;
+  for (auto frame : frames) {
+    total_frame += frame;
+  }
+  int avg_frame = total_frame / (int)frames.size();
+  double stddev = 0.0; // Compute the sample standard deviation
+  for (auto i=0; i<frames.size(); ++i) {
+    stddev += (frames[i] - avg_frame) * (frames[i] - avg_frame);
+  }
+  stddev = sqrt(stddev / (double)(FLAGS_repeat_games - 1));
+
   LOG(INFO) << "Evaluation total_score = " << total_score
             << " (/" << FLAGS_repeat_games << ")";
   LOG(INFO) << "Evaluation goal_percentage = " << avg_score;
@@ -185,41 +204,55 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   LOG(INFO) << "  captured_by_defense : " << captured_by_defense;
   LOG(INFO) << "  out_of_bounds : " << out_of_bounds;
   LOG(INFO) << "  out_of_time : " << out_of_time;
-  LOG(INFO) << "Evaluation successfully finished!";
+  LOG(INFO) << "Evaluation avg_frames = " << avg_frame << " std = " << stddev;
   return avg_score;
 }
 
 void Evaluate_With_Comparison(dqn::DQN& dqn) {
-  std::string cmd = "";
   LOG(INFO) << "Evaluate agent2D : ";
+  //  sleep(5);
   for (int i = 0; i < FLAGS_trials; ++i) {
-    std::cout << "Evaluate agent2D trial " << i+1;
-    cmd = "./scripts/start.py --offense-agents 0 --offense-npcs 1 --defense-agents 0 --defense-npcs 0 --port 7010 --headless";
+    std::string cmd = "";
+    cmd += "echo \"\" && " ;
+    cmd += "echo \"Evaluate agent2D trial " + std::to_string(i+1) + "\" && ";
+    cmd += "./scripts/start.py --offense-agents 0 --offense-npcs 1 --defense-agents 0 --defense-npcs 0 --headless --no-logging";
+    cmd += " --port " + std::to_string(FLAGS_port);
     cmd += " --trials " + std::to_string(FLAGS_repeat_games);
+    cmd += " --seed " + std::to_string(FLAGS_seed);
     CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
-    // cmd += " && ";
-    cmd = "";
   }
+  LOG(INFO) << "Successfully evaluate agent2D!";
+
   LOG(INFO) << "Evaluate our trained agent : ";
-  int port = 8010;
   for (int i = 0; i < FLAGS_trials; ++i) {
-    //    cmd += "./scripts/start.py --offense-agents 0 --offense-npcs 1 --defense-agents 0 --defense-npcs 0 --port 7010 --headless";
-    //CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+    std::string cmd = "";
+    cmd += "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --headless --no-logging";
+    cmd += " --port " + std::to_string(FLAGS_port + i * 100);
+    cmd += " --seed " + std::to_string(FLAGS_seed);
+    cmd += " &";
+    CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
     HFOEnvironment hfo;
-    hfo.connectToAgentServer(port, LOW_LEVEL_FEATURE_SET);
-    port += 100;
-    LOG(INFO) << "Evaluate " << i;
+    hfo.connectToAgentServer(FLAGS_port + i * 100, LOW_LEVEL_FEATURE_SET);
+    LOG(INFO) << "Evaluate our trained agent trial " << i;
     Evaluate(hfo,dqn);
+    LOG(INFO) << "";
   }
-  LOG(INFO) << "Evaluate handcraft agent : ";
-  cmd = "";
-  for (int i = 0; i < FLAGS_trials; ++i) {
-    cmd += "((./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 &) && ./example/hfo_1v0_handcraft_agent) && ";
-  }
-  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+  LOG(INFO) << "Successfully evaluate our trained agent!!";
+
+  // LOG(INFO) << "Evaluate handcraft agent : ";
+  // for (int i = 0; i < FLAGS_trials; ++i) {
+  //   std::string cmd = "";
+  //   cmd += "(./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0  --headless --no-logging";
+  //   cmd += " --port " + std::to_string(FLAGS_port);
+  //   cmd += " --trials " + std::to_string(FLAGS_repeat_games);
+  //   cmd += " --seed " + std::to_string(FLAGS_seed);
+  //   cmd += " &) && ../HFO/example/hfo_1v0_handcraft_agent";
+  //   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+  // }
+  // LOG(INFO) << "Successfully evaluate handcraft agent!";
 }
 
-void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
+void TrainMimic(dqn::DQN& dqn, path save_path) {
   LOG(INFO) << "Begin training with mimic data.";
   LOG(INFO) << "The replay memory has " << dqn.memory_size() << " transitions.";
   int epochs = 0;
@@ -232,6 +265,7 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
     float softmaxloss = 0;
     std::vector<std::pair<int, int>> accuracy_train, accuracy_test;
     std::vector<float> deviation_train, deviation_test;
+    std::pair<float,float> loss_train, loss_test;
     for (int i = 0; i < 4; ++i) {
       accuracy_train.push_back(std::make_pair(0,0));
       accuracy_test.push_back(std::make_pair(0,0));
@@ -241,10 +275,9 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
       deviation_test.push_back(0);
     }
     for (; i < threshold; ++i) {
-      std::pair<float,float> loss = dqn.UpdateActor(i, true, accuracy_train,
-                                                    deviation_train);
-      euclideanloss += loss.first;
-      softmaxloss += loss.second;
+      dqn.UpdateActor(i, true, accuracy_train, deviation_train, loss_train);
+      euclideanloss += loss_train.first;
+      softmaxloss += loss_train.second;
     }
     euclideanloss = euclideanloss / i;
     softmaxloss = softmaxloss / i;
@@ -287,10 +320,9 @@ void TrainMimic(HFOEnvironment& hfo, dqn::DQN& dqn, path save_path) {
               << " train_kick_deviation2 : " << deviation_train[5] / accuracy_train[3].first;
     for (; i < dqn.memory_size() / dqn::kMinibatchSize; ++i) {
       test_times++;
-      std::pair<float,float> loss = dqn.UpdateActor(i, false,
-                                                    accuracy_test, deviation_test);
-      euclideanloss += loss.first;
-      softmaxloss += loss.second;
+      dqn.UpdateActor(i, false, accuracy_test, deviation_test, loss_test);
+      euclideanloss += loss_test.first;
+      softmaxloss += loss_test.second;
     }
     euclideanloss = euclideanloss / test_times;
     softmaxloss = softmaxloss / test_times;
@@ -380,23 +412,6 @@ int main(int argc, char** argv) {
                             FLAGS_critic_snapshot, FLAGS_memory_snapshot);
   }
 
-  if (FLAGS_port < 0) {
-    srand(std::hash<std::string>()(save_path.native()));
-    FLAGS_port = rand() % 40000 + 20000;
-  }
-  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
-  if (!FLAGS_gui) { cmd += " --headless"; }
-  if (!FLAGS_evaluate) { cmd += " --no-logging"; }
-  if (FLAGS_evaluate) {
-    cmd += " --record";
-    cmd += " --seed " + std::to_string(FLAGS_seed);
-  }
-  cmd += " &";
-  LOG(INFO) << "Starting server with command: " << cmd;
-  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
-
-  HFOEnvironment hfo;
-  hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
 
   // Get the vector of legal actions
   std::vector<int> legal_actions(dqn::kActionCount);
@@ -438,7 +453,7 @@ int main(int argc, char** argv) {
       LOG(INFO) << "Loading mimic data into replay memory from /scratch/cluster/chen/mimic_data/";
       dqn.LoadMimicData(FLAGS_mimic_data);
       LOG(INFO) << "Successfully load mimic data into replay memory!";
-      TrainMimic(hfo, dqn, save_path);
+      TrainMimic(dqn, save_path);
       LOG(INFO) << "Successfully train the network with mimic data.";
       return 0;
     }
@@ -449,46 +464,65 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (FLAGS_evaluate) {
-    LOG(INFO) << "Begin to evaluate!";
-    Evaluate(hfo, dqn);
-    return 0;
-  }
-
   if (FLAGS_evaluate_with_comparison) {
     LOG(INFO) << "Begin to evaluate with comparison!";
     Evaluate_With_Comparison(dqn);
+    LOG(INFO) << "Finish evaluating with comparison!";
     return 0;
   }
 
-
-  int last_eval_iter = 0;
-  int episode = 0;
-  double best_score = std::numeric_limits<double>::min();
-  while (dqn.current_iteration() < actor_solver_param.max_iter()) {
-    double epsilon = CalculateEpsilon(dqn.current_iteration());
-    double score = PlayOneEpisode(hfo, dqn, epsilon, true);
-    LOG(INFO) << "Episode " << episode << " score = " << score
-              << ", epsilon = " << epsilon
-              << ", iter = " << dqn.current_iteration()
-              << ", replay_mem_size = " << dqn.memory_size();
-    episode++;
-
-    if (dqn.current_iteration() >= last_eval_iter + FLAGS_evaluate_freq) {
-      double avg_score = Evaluate(hfo, dqn);
-      if (avg_score > best_score) {
-        LOG(INFO) << "iter " << dqn.current_iteration()
-                  << " New High Score: " << avg_score;
-        best_score = avg_score;
-        std::string fname = save_path.native() + "_HiScore" +
-            std::to_string(avg_score);
-        dqn.Snapshot(fname, false, false);
-      }
-      dqn.Snapshot(save_path.native(), true, true);
-      last_eval_iter = dqn.current_iteration();
-    }
+  if (FLAGS_port < 0) {
+    srand(std::hash<std::string>()(save_path.native()));
+    FLAGS_port = rand() % 40000 + 20000;
   }
-  if (dqn.current_iteration() >= last_eval_iter) {
+  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
+  if (!FLAGS_gui) { cmd += " --headless"; }
+  if (!FLAGS_evaluate) { cmd += " --no-logging"; }
+  if (FLAGS_evaluate) {
+    cmd += " --record";
+    cmd += " --seed " + std::to_string(FLAGS_seed);
+  }
+  cmd += " &";
+  LOG(INFO) << "Starting server with command: " << cmd;
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+
+  HFOEnvironment hfo;
+  hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
+
+  if (FLAGS_evaluate) {
+    LOG(INFO) << "Begin to evaluate!";
     Evaluate(hfo, dqn);
+    LOG(INFO) << "Evaluation successfully finished!";
+    return 0;
   }
+
+  // int last_eval_iter = 0;
+  // int episode = 0;
+  // double best_score = std::numeric_limits<double>::min();
+  // while (dqn.current_iteration() < actor_solver_param.max_iter()) {
+  //   double epsilon = CalculateEpsilon(dqn.current_iteration());
+  //   double score = PlayOneEpisode(hfo, dqn, epsilon, true);
+  //   LOG(INFO) << "Episode " << episode << " score = " << score
+  //             << ", epsilon = " << epsilon
+  //             << ", iter = " << dqn.current_iteration()
+  //             << ", replay_mem_size = " << dqn.memory_size();
+  //   episode++;
+
+  //   if (dqn.current_iteration() >= last_eval_iter + FLAGS_evaluate_freq) {
+  //     double avg_score = Evaluate(hfo, dqn);
+  //     if (avg_score > best_score) {
+  //       LOG(INFO) << "iter " << dqn.current_iteration()
+  //                 << " New High Score: " << avg_score;
+  //       best_score = avg_score;
+  //       std::string fname = save_path.native() + "_HiScore" +
+  //           std::to_string(avg_score);
+  //       dqn.Snapshot(fname, false, false);
+  //     }
+  //     dqn.Snapshot(save_path.native(), true, true);
+  //     last_eval_iter = dqn.current_iteration();
+  //   }
+  // }
+  // if (dqn.current_iteration() >= last_eval_iter) {
+  //   Evaluate(hfo, dqn);
+  // }
 };

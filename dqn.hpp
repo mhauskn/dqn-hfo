@@ -98,9 +98,10 @@ public:
   // void UpdateCritic();
 
   // update the actor network
-  std::pair<float,float> UpdateActor(int update_idx, bool update,
-                                     std::vector<std::pair<int, int>>& accuracy,
-                                     std::vector<float>& deviation);
+  void UpdateActor(int update_idx, bool update,
+                   std::vector<std::pair<int, int>>& accuracy,
+                   std::vector<float>& deviation,
+                   std::pair<float,float>& loss);
 
   // evaluate the actor network performance by loss
   void EvaluateActor(int evaluate_idx);
