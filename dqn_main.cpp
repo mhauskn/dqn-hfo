@@ -75,15 +75,15 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
       const Action action = dqn.SelectAction(input_states, epsilon);
-      // float q_value = dqn.EvaluateAction(input_states, action);
-      // LOG(INFO) << "q_value: " << q_value << " Action: " << hfo.ActionToString(action);
+      VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, action)
+              << " Action: " << hfo.ActionToString(action);
       status = hfo.act(action);
       float reward = 0;
       if (status == GOAL) {
-        reward = 1;
+        reward = 1; VLOG(1) << "GOAL";
       } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
                  status == OUT_OF_TIME) {
-        reward = -1;
+        reward = -1; VLOG(1) << "FAIL";
       }
       total_score += reward;
       if (update) {
@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
   double best_score = std::numeric_limits<double>::min();
   while (dqn.actor_iter() < actor_solver_param.max_iter() &&
          dqn.critic_iter() < critic_solver_param.max_iter()) {
-    double epsilon = CalculateEpsilon(dqn.actor_iter());
+    double epsilon = CalculateEpsilon(dqn.max_iter());
     double score = PlayOneEpisode(hfo, dqn, epsilon, true);
     LOG(INFO) << "Episode " << episode << " score = " << score
               << ", epsilon = " << epsilon
