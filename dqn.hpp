@@ -25,12 +25,12 @@ constexpr auto kActionParamsInputDataSize = kMinibatchSize * kActionParamSize;
 constexpr auto kTargetInputDataSize = kMinibatchSize * kActionSize;
 constexpr auto kFilterInputDataSize = kMinibatchSize * kActionSize;
 
+using ActorOutput = std::array<float, kActionSize + kActionParamSize>;
 using StateData   = std::array<float, kStateSize>;
 using StateDataSp = std::shared_ptr<StateData>;
 using InputStates = std::array<StateDataSp, kStateInputCount>;
-using Transition  = std::tuple<InputStates, hfo::Action,
+using Transition  = std::tuple<InputStates, ActorOutput,
                                float, boost::optional<StateDataSp>>;
-using ActionValue = std::pair<float, float>;
 using SolverSp    = std::shared_ptr<caffe::Solver<float>>;
 using NetSp       = boost::shared_ptr<caffe::Net<float>>;
 
@@ -76,16 +76,17 @@ public:
 
   // Generates a HFO action uniformly at random
   hfo::Action GetRandomHFOAction();
+  ActorOutput GetRandomActorOutput();
 
   // Select an action using epsilon-greedy action selection.
-  hfo::Action SelectAction(const InputStates& input_states, double epsilon);
+  ActorOutput SelectAction(const InputStates& input_states, double epsilon);
 
   // Select a batch of actions using epsilon-greedy action selection.
-  std::vector<hfo::Action> SelectActions(const std::vector<InputStates>& states_batch,
+  std::vector<ActorOutput> SelectActions(const std::vector<InputStates>& states_batch,
                                          double epsilon);
 
   // Evaluate a state-action, returning the q-value.
-  float EvaluateAction(const InputStates& input_states, const hfo::Action& action);
+  float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
 
   // Assess the critic's (ignorant) optimism. Returns the probability
   // that a random action is better than the actor's suggested action
@@ -121,7 +122,7 @@ protected:
 
   // Update DQN using one minibatch. Returns the loss.
   float UpdateCritic();
-  // Updates the actor against the critic_net_
+  // Updates the actor against the critic_net_. Returns diff from critic.
   float UpdateActor();
   // Update the actor network from the gradients provided by the critic
   float UpdateActor(caffe::Net<float>& critic);
@@ -135,11 +136,11 @@ protected:
   void CloneNet(NetSp& net_from, NetSp& net_to);
 
   // Given input states, use the actor network to select an action.
-  hfo::Action SelectActionGreedily(caffe::Net<float>& actor,
+  ActorOutput SelectActionGreedily(caffe::Net<float>& actor,
                                    const InputStates& last_states);
 
   // Given a batch of input states, return a batch of selected actions.
-  std::vector<hfo::Action> SelectActionGreedily(
+  std::vector<ActorOutput> SelectActionGreedily(
       caffe::Net<float>& actor,
       const std::vector<InputStates>& states_batch);
 
@@ -150,7 +151,7 @@ protected:
   // Runs forward on critic to produce q-values.
   std::vector<float> CriticForward(caffe::Net<float>& critic,
                                    const std::vector<InputStates>& states_batch,
-                                   const std::vector<hfo::Action>& action_batch);
+                                   const std::vector<ActorOutput>& action_batch);
 
   // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
@@ -176,6 +177,11 @@ protected:
   std::mt19937 random_engine;
   float smoothed_critic_loss_, smoothed_actor_loss_;
 };
+
+/**
+ * Converts an ActorOutput into an action
+ */
+hfo::Action GetAction(const ActorOutput& actor_output);
 
 /**
  * Returns a vector of filenames matching a given regular expression.

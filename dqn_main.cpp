@@ -67,15 +67,16 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kStateInputCount) {
-      status = hfo.act({DASH, 0., 0.});
+      status = hfo.act({DASH, 0, 0});
     } else {
       while (past_states.size() > dqn::kStateInputCount) {
         past_states.pop_front();
       }
       dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
-      const Action action = dqn.SelectAction(input_states, epsilon);
-      VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, action)
+      const dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
+      const Action action = dqn::GetAction(actor_output);
+      VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
               << " Action: " << hfo.ActionToString(action);
       status = hfo.act(action);
       float reward = 0;
@@ -92,8 +93,8 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (status == IN_GAME) ?
-            dqn::Transition(input_states, action, reward, next_state_sp):
-            dqn::Transition(input_states, action, reward, boost::none);
+            dqn::Transition(input_states, actor_output, reward, next_state_sp):
+            dqn::Transition(input_states, actor_output, reward, boost::none);
         dqn.AddTransition(transition);
         dqn.Update();
       }
