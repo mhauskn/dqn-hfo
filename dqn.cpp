@@ -26,6 +26,7 @@ DEFINE_int32(memory_threshold, 10000, "Number of transitions to start learning")
 DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_bool(update_actor, true, "Perform updates on actor.");
 DEFINE_bool(update_critic, true, "Perform updates on critic.");
+DEFINE_double(q_diff, -1.0, "Diff at Critic's Q-Values layer.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -660,7 +661,7 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   // Set the critic diff and run backward
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
   for (int n = 0; n < kMinibatchSize; n++) {
-    q_values_diff[q_values_blob->offset(n,0,0,0)] = -1.0;
+    q_values_diff[q_values_blob->offset(n,0,0,0)] = FLAGS_q_diff;
   }
   DLOG(INFO) << " [Backwards] " << critic.name();
   critic.BackwardFrom(GetLayerIndex(critic, q_values_layer_name));
