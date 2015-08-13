@@ -14,6 +14,8 @@
 
 namespace dqn {
 
+using namespace hfo;
+
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
                  const std::string& blob_name,
@@ -362,6 +364,11 @@ void DQN::UpdateActor(int update_idx, bool update,
   std::fill(filter_batch.begin(), filter_batch.end(), 0.0);
   std::vector<Action> target_action_batch(kMinibatchSize);
   for (auto i = 0; i < kMinibatchSize; ++i) {
+    // LOG(INFO) << "This is transition " << update_idx * kMinibatchSize + i;
+    // LOG(INFO) << "This is number "
+    //           << std::get<2>(replay_memory_[update_idx * kMinibatchSize + i])
+    //           << " in data file";
+
     // Sample transitions from replay memory_size
     const auto& transition = replay_memory_[update_idx * kMinibatchSize + i];
     // fill state input
@@ -650,7 +657,7 @@ void DQN::LoadMimicData(const std::string& filename){
   if (!ifile.is_open())
     LOG(INFO) << "Cannot open file /scratch/cluster/chen/mimic_data/" << filename;
   std::string temp_string;
-  int temp_int;
+  int temp_int, index; // index refers to the transition number in th data file
   bool memory_full = false;
   while (!ifile.eof()) {
     ifile >> temp_int >> temp_int >> temp_string >> temp_string;
@@ -671,33 +678,51 @@ void DQN::LoadMimicData(const std::string& filename){
       ActorStateDataSp statesp = std::make_shared<ActorStateData>();
       for (int i = 0; i < kStateDataSize; ++i) {
         ifile >> (*statesp)[i];
+        CHECK_LE((*statesp)[i], 1) << "StateFeatures Parsing is wrong!";
+        CHECK_GE((*statesp)[i], -1) << "StateFeatures Parsing is wrong!";
       }
       past_states.push_back(statesp);
-      std::getline(ifile, temp_string);
-      std::getline(ifile, temp_string);
-      std::getline(ifile, temp_string);
+      std::getline(ifile, temp_string); // fetch line StateFeatures
+      std::getline(ifile, temp_string); // fetch line Action
+      std::getline(ifile, temp_string); // fetch line GameStatus
     }
     dqn::Transition t;
     int game_status = 0;
+    bool statefeatures_written = false, action_written = false;
     while (!ifile.eof() && !memory_full) {
-      ifile >> temp_int >> temp_int >> temp_string >> temp_string;
+      ifile >> index >> temp_int >> temp_string >> temp_string;
       if (temp_string == "GameStatus") {
         ifile >> game_status;
         // TODO find a way not to load data with ball catched
         if (game_status == 1 || game_status == 2 ||
             game_status == 3 || game_status == 4) {
-          std::getline(ifile, temp_string);
-          std::getline(ifile, temp_string);
-          std::getline(ifile, temp_string);
-          std::getline(ifile, temp_string);
+          std::getline(ifile, temp_string); // fetch line GameStatus
+          std::getline(ifile, temp_string); // fetch line StatusFeature
+          std::getline(ifile, temp_string); // fetch line Action
+          // In some situations, there is no action line. Then this line should be GameStatus line. We don't need to fetch another line.
+          std::vector<std::string> strs;
+          boost::split(strs, temp_string, boost::is_any_of(" "));
+          if (strs[3] == "player_agent.cpp") {
+            std::getline(ifile, temp_string); // fetch line GameStatus
+            // In some situations, there is two action lines.
+            boost::split(strs, temp_string, boost::is_any_of(" "));
+            if (strs[3] == "player_agent.cpp")
+              std::getline(ifile, temp_string); // fetch line GameStatus
+          }
           break;
+        }
+        else if (game_status != 0) {
+          CHECK(0) << "GameStatus is wrong.";
         }
       }
       else if (temp_string == "StateFeatures") {
+        statefeatures_written = true;
         ActorStateDataSp statesp = std::make_shared<ActorStateData>();
         // std::shared_ptr<ActorStateData> statesp(new dqn::ActorStateData);
         for (int i = 0; i < kStateDataSize; ++i) {
           ifile >> (*statesp)[i];
+          CHECK_LE((*statesp)[i], 1) << "StateFeatures Parsing is wrong!";
+          CHECK_GE((*statesp)[i], -1) << "StateFeatures Parsing is wrong!";
         }
         past_states.push_back(statesp);
         while (past_states.size() > kStateInputCount) {
@@ -707,27 +732,47 @@ void DQN::LoadMimicData(const std::string& filename){
         std::copy(past_states.begin(), past_states.end(), states.begin());
       }
       else if (temp_string == "player_agent.cpp:") {
+        action_written = true;
         ifile >> temp_string;
         std::vector<std::string> strs;
-        boost::split(strs,temp_string,boost::is_any_of("(,)"));
+        boost::split(strs, temp_string, boost::is_any_of("(,)"));
         if (strs[0] == "Dash") {
+          CHECK_LE(std::stof(strs[1]), 100) << "Dash Power is wrong!";
+          CHECK_GE(std::stof(strs[1]), -100) << "Dash Power is wrong!";
+          CHECK_LE(std::stof(strs[2]), 180) << "Dash Angle is wrong!";
+          CHECK_GE(std::stof(strs[2]), -180) << "Dash Angle is wrong!";
           std::get<1>(t) = {DASH, std::stof(strs[1]), std::stof(strs[2])};
         }
         else if (strs[0] == "Turn") {
+          CHECK_LE(std::stof(strs[1]), 180) << "Turn Angle is wrong!";
+          CHECK_GE(std::stof(strs[1]), -180) << "Turn Angle is wrong!";
           std::get<1>(t) = {TURN, std::stof(strs[1])};
         }
         else if (strs[0] == "Tackle") {
+          CHECK_LE(std::stof(strs[1]), 180) << "Tackle Angle is wrong!";
+          CHECK_GE(std::stof(strs[1]), -180) << "Tackle Angle is wrong!";
           std::get<1>(t) = {TACKLE, std::stof(strs[1])};
         }
         else if (strs[0] == "Kick") {
+          CHECK_LE(std::stof(strs[1]), 100) << "Kick Power is wrong!";
+          CHECK_GE(std::stof(strs[1]), 0) << "Kick Power is wrong!";
+          CHECK_LE(std::stof(strs[2]), 180) << "Kick Angle is wrong!";
+          CHECK_GE(std::stof(strs[2]), -180) << "Kick Angle is wrong!";
           std::get<1>(t) = {KICK, std::stof(strs[1]), std::stof(strs[2])};
         }
-        replay_memory_.push_back(t);
-        if (replay_memory_.size() % 100000 == 0) {
-          LOG(INFO) << "Parse " << replay_memory_.size() << " transitions.";
-        }
-        if (replay_memory_.size() == replay_memory_capacity_) {
-          memory_full = true;
+        else { LOG(INFO) << "Action is wrong!"; }
+
+        if (statefeatures_written && action_written) {
+          std::get<2>(t) = index;
+          replay_memory_.push_back(t);
+          statefeatures_written = false;
+          action_written = false;
+          if (replay_memory_.size() % 100000 == 0) {
+            LOG(INFO) << "Parse " << replay_memory_.size() << " transitions.";
+          }
+          if (replay_memory_.size() == replay_memory_capacity_) {
+            memory_full = true;
+          }
         }
       }
       //      LOG(INFO) << temp_string;
@@ -738,7 +783,8 @@ void DQN::LoadMimicData(const std::string& filename){
   //  LOG(INFO) << replay_memory_.size();
 
   // for (int i = 0; i < replay_memory_.size(); ++i) {
-  //   LOG(INFO) << "\nTransition: " << i;
+  //   LOG(INFO) << "\nTransition in replay_memory: " << i
+  //             << "    Transition in data file: " << std::get<2>(replay_memory_[i]);
   //   LOG(INFO) << "PastStates:";
   //   std::string state = "";
   //   std::string action;

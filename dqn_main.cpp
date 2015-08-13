@@ -13,6 +13,7 @@
 #include <stdlib.h>
 
 using namespace boost::filesystem;
+using namespace hfo;
 
 // DQN Parameters
 DEFINE_bool(gpu, true, "Use GPU to brew Caffe");
@@ -46,12 +47,13 @@ DEFINE_string(actor_solver, "dqn_actor_solver.prototxt",
 DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
               "Critic solver parameter file (*.prototxt)");
 DEFINE_string(server_cmd,
-              "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0 --record",
+              "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 1 --record",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, 6010, "Port to use for server/client.");
 DEFINE_int32(seed, 1, "Seed the trainer's RNG");
-DEFINE_string(mimic_data, "1v0/2.log", "The mimic state-action train data to load (*.log)");
+DEFINE_string(mimic_data, "1v1/agent.log", "The mimic state-action train data to load (*.log)");
 DEFINE_bool(mimic, false, "Mimic mode: mimic agent2D by training the network with mimic_data");
+DEFINE_int32(npcs, 1, "npcs used in the game: will change the state space.(now only 0 or 1)");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -64,12 +66,12 @@ double CalculateEpsilon(const int iter) {
 /**
  * Play one episode and return the total score
  */
-hfo_status_t PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
+status_t PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                             const bool update, int& frames) {
   hfo.act({DASH, 0, 0});
   std::deque<dqn::ActorStateDataSp> past_states;
   double total_score = 0;
-  hfo_status_t status = IN_GAME;
+  status_t status = IN_GAME;
   frames = 0;
   while (status == IN_GAME) {
     frames++;
@@ -149,30 +151,30 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   int goal = 0, captured_by_defense = 0, out_of_bounds = 0, out_of_time = 0;
   std::vector<int> frames(FLAGS_repeat_games);
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    hfo_status_t status = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon,
+    status_t status = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon,
                                          false, frames[i]);
     float score = 0;
     switch (status) {
       case GOAL:
         goal += 1;
         score = 1;
-        // LOG(INFO) << "Episode " << i+1 << ": score = "
-        //           << score << " (goal)";
+        LOG(INFO) << "Episode " << i+1 << ": score = "
+                  << score << " (goal)";
         break;
       case CAPTURED_BY_DEFENSE:
         captured_by_defense += 1;
-        // LOG(INFO) << "Episode " << i+1 << ": score = "
-        //           << score << " (captured by defense)";
+        LOG(INFO) << "Episode " << i+1 << ": score = "
+                  << score << " (captured by defense)";
         break;
       case OUT_OF_TIME:
         out_of_time += 1;
-        // LOG(INFO) << "Episode " << i+1 << ": score = "
-        //           << score << " (out of time)";
+        LOG(INFO) << "Episode " << i+1 << ": score = "
+                  << score << " (out of time)";
         break;
       case OUT_OF_BOUNDS:
         out_of_bounds += 1;
-        // LOG(INFO) << "Episode " << i+1 << ": score = "
-        //           << score << " (out of bounds)";
+        LOG(INFO) << "Episode " << i+1 << ": score = "
+                  << score << " (out of bounds)";
         break;
     }
     scores.push_back(score);
@@ -204,24 +206,25 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   LOG(INFO) << "  captured_by_defense : " << captured_by_defense;
   LOG(INFO) << "  out_of_bounds : " << out_of_bounds;
   LOG(INFO) << "  out_of_time : " << out_of_time;
+  LOG(INFO) << "Evaluation total_frames = " << total_frame;
   LOG(INFO) << "Evaluation avg_frames = " << avg_frame << " std = " << stddev;
   return avg_score;
 }
 
 void Evaluate_With_Comparison(dqn::DQN& dqn) {
-  LOG(INFO) << "Evaluate agent2D : ";
-  //  sleep(5);
-  for (int i = 0; i < FLAGS_trials; ++i) {
-    std::string cmd = "";
-    cmd += "echo \"\" && " ;
-    cmd += "echo \"Evaluate agent2D trial " + std::to_string(i+1) + "\" && ";
-    cmd += "./scripts/start.py --offense-agents 0 --offense-npcs 1 --defense-agents 0 --defense-npcs 0 --headless --no-logging";
-    cmd += " --port " + std::to_string(FLAGS_port);
-    cmd += " --trials " + std::to_string(FLAGS_repeat_games);
-    cmd += " --seed " + std::to_string(FLAGS_seed);
-    CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
-  }
-  LOG(INFO) << "Successfully evaluate agent2D!";
+  // LOG(INFO) << "Evaluate agent2D : ";
+  // //  sleep(5);
+  // for (int i = 0; i < FLAGS_trials; ++i) {
+  //   std::string cmd = "";
+  //   cmd += "echo \"\" && " ;
+  //   cmd += "echo \"Evaluate agent2D trial " + std::to_string(i+1) + "\" && ";
+  //   cmd += "./scripts/start.py --offense-agents 0 --offense-npcs 1 --defense-agents 0 --defense-npcs 0 --headless --no-logging";
+  //   cmd += " --port " + std::to_string(FLAGS_port);
+  //   cmd += " --trials " + std::to_string(FLAGS_repeat_games);
+  //   cmd += " --seed " + std::to_string(FLAGS_seed);
+  //   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+  // }
+  // LOG(INFO) << "Successfully evaluate agent2D!";
 
   LOG(INFO) << "Evaluate our trained agent : ";
   for (int i = 0; i < FLAGS_trials; ++i) {
@@ -239,17 +242,17 @@ void Evaluate_With_Comparison(dqn::DQN& dqn) {
   }
   LOG(INFO) << "Successfully evaluate our trained agent!!";
 
-  // LOG(INFO) << "Evaluate handcraft agent : ";
-  // for (int i = 0; i < FLAGS_trials; ++i) {
-  //   std::string cmd = "";
-  //   cmd += "(./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0  --headless --no-logging";
-  //   cmd += " --port " + std::to_string(FLAGS_port);
-  //   cmd += " --trials " + std::to_string(FLAGS_repeat_games);
-  //   cmd += " --seed " + std::to_string(FLAGS_seed);
-  //   cmd += " &) && ../HFO/example/hfo_1v0_handcraft_agent";
-  //   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
-  // }
-  // LOG(INFO) << "Successfully evaluate handcraft agent!";
+  LOG(INFO) << "Evaluate handcraft agent : ";
+  for (int i = 0; i < FLAGS_trials; ++i) {
+    std::string cmd = "";
+    cmd += "(./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 0  --headless --no-logging";
+    cmd += " --port " + std::to_string(FLAGS_port);
+    cmd += " --trials " + std::to_string(FLAGS_repeat_games);
+    cmd += " --seed " + std::to_string(FLAGS_seed);
+    cmd += " &) && ../HFO/example/hfo_1v0_handcraft_agent";
+    CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
+  }
+  LOG(INFO) << "Successfully evaluate handcraft agent!";
 }
 
 void TrainMimic(dqn::DQN& dqn, path save_path) {
@@ -278,6 +281,7 @@ void TrainMimic(dqn::DQN& dqn, path save_path) {
       dqn.UpdateActor(i, true, accuracy_train, deviation_train, loss_train);
       euclideanloss += loss_train.first;
       softmaxloss += loss_train.second;
+      // LOG(INFO) << "This is " << i << " minibatch";
     }
     euclideanloss = euclideanloss / i;
     softmaxloss = softmaxloss / i;
