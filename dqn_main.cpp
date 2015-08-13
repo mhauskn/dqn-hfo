@@ -28,6 +28,9 @@ DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemo
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
 DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solverstate).");
 DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory).");
+// Solver Args
+DEFINE_int32(actor_max_iter, 0, "Custom max iter of the actor.");
+DEFINE_int32(critic_max_iter, 0, "Custom max iter of the critic.");
 // Epsilon-Greedy Args
 DEFINE_int32(explore, 1000000, "Iterations for epsilon to reach given value.");
 DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
@@ -194,6 +197,12 @@ int main(int argc, char** argv) {
   caffe::ReadProtoFromTextFileOrDie(FLAGS_critic_solver, &critic_solver_param);
   actor_solver_param.set_snapshot_prefix((save_path.native() + "_actor").c_str());
   critic_solver_param.set_snapshot_prefix((save_path.native() + "_critic").c_str());
+  if (FLAGS_actor_max_iter > 0) {
+    actor_solver_param.set_max_iter(FLAGS_actor_max_iter);
+  }
+  if (FLAGS_critic_max_iter > 0) {
+    critic_solver_param.set_max_iter(FLAGS_critic_max_iter);
+  }
 
   dqn::DQN dqn(actor_solver_param, critic_solver_param);
 
