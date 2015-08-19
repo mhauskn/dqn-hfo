@@ -44,6 +44,8 @@ DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 DEFINE_string(server_cmd, "./scripts/start.py --offense-agents 1 --fullstate",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
+// Misc Args
+DEFINE_bool(warp_action, false, "Warp actions in direction of critic improvment.");
 
 
 double CalculateEpsilon(const int iter) {
@@ -55,13 +57,15 @@ double CalculateEpsilon(const int iter) {
 }
 
 /**
- * Play one episode and return the total score
+ * Play one episode and return the total score and number of steps
  */
-double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
-                      const bool update) {
+std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
+                                      const double epsilon,
+                                      const bool update, float warp_action) {
   hfo.act({DASH, 0, 0});
   std::deque<dqn::StateDataSp> past_states;
   double total_score = 0;
+  int steps = 0;
   status_t status = IN_GAME;
   while (status == IN_GAME) {
     const std::vector<float>& current_state = hfo.getState();
@@ -77,10 +81,18 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       }
       dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
-      const dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
-      const Action action = dqn::GetAction(actor_output);
+      dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
+      Action action = dqn::GetAction(actor_output);
       VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
               << " Action: " << hfo.ActionToString(action);
+      if (FLAGS_warp_action && warp_action > 0) {
+        const dqn::ActorOutput warped_output = dqn.WarpAction(
+            input_states, actor_output, 0.0, warp_action);
+        const Action warped_action = dqn::GetAction(warped_output);
+        VLOG(1) << "Warped Action: " << hfo.ActionToString(warped_action);
+        actor_output = warped_output;
+        action = warped_action;
+      }
       status = hfo.act(action);
       float reward = 0;
       if (status == GOAL) {
@@ -90,6 +102,7 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
         reward = -1; VLOG(1) << "FAIL";
       }
       total_score += reward;
+      steps++;
       if (update) {
         const std::vector<float>& next_state = hfo.getState();
         CHECK_EQ(next_state.size(), dqn::kStateSize);
@@ -103,29 +116,40 @@ double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
       }
     }
   }
-  return total_score;
+  return std::make_pair(total_score, steps);
 }
 
 /**
  * Evaluate the current player
  */
 double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
+  LOG(INFO) << "Evaluating for " << FLAGS_repeat_games
+            << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon;
   std::vector<double> scores;
+  std::vector<int> steps;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    double score = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
-    scores.push_back(score);
+    std::pair<double,int> result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false, -1);
+    scores.push_back(result.first);
+    steps.push_back(result.second);
   }
   double total_score = 0.0;
-  for (auto score : scores) {
-    total_score += score;
+  double total_steps = 0.0;
+  for (int i = 0; i < scores.size(); ++i) {
+    total_score += scores[i];
+    total_steps += steps[i];
   }
   const auto avg_score = total_score / static_cast<double>(scores.size());
-  double stddev = 0.0; // Compute the sample standard deviation
-  for (auto i=0; i<scores.size(); ++i) {
-    stddev += (scores[i] - avg_score) * (scores[i] - avg_score);
+  const auto avg_steps = total_steps / static_cast<double>(steps.size());
+  double score_stddev = 0.0; // Compute the sample standard deviation
+  double steps_stddev = 0.0;
+  for (int i = 0; i < scores.size(); ++i) {
+    score_stddev += (scores[i] - avg_score) * (scores[i] - avg_score);
+    steps_stddev += (steps[i] - avg_steps) * (steps[i] - avg_steps);
   }
-  stddev = sqrt(stddev / static_cast<double>(FLAGS_repeat_games - 1));
-  LOG(INFO) << "Evaluation avg_score = " << avg_score << " std = " << stddev;
+  score_stddev = sqrt(score_stddev / static_cast<double>(FLAGS_repeat_games - 1));
+  steps_stddev = sqrt(steps_stddev / static_cast<double>(FLAGS_repeat_games - 1));
+  LOG(INFO) << "Evaluation avg_score = " << avg_score << ", std = " << score_stddev
+            << ", avg_steps = " << avg_steps << ", std = " << steps_stddev;
   return avg_score;
 }
 
@@ -227,7 +251,7 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_benchmark) {
-    double score = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true);
+    PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true, -1);
     dqn.Benchmark(1000);
     return 0;
   }
@@ -235,16 +259,22 @@ int main(int argc, char** argv) {
   int last_eval_iter = 0;
   int last_snapshot_iter = 0;
   int episode = 0;
+  float warp_level = FLAGS_warp_action ? 1.0 : -1.0; // How much to warp actions by
   double best_score = std::numeric_limits<double>::min();
   while (dqn.actor_iter() < actor_solver_param.max_iter() &&
          dqn.critic_iter() < critic_solver_param.max_iter()) {
     double epsilon = CalculateEpsilon(dqn.max_iter());
-    double score = PlayOneEpisode(hfo, dqn, epsilon, true);
-    LOG(INFO) << "Episode " << episode << " score = " << score
+    std::pair<double,int> result = PlayOneEpisode(hfo, dqn, epsilon, true, warp_level);
+    LOG(INFO) << "Episode " << episode << " score = " << result.first
+              << ", steps = " << result.second
               << ", epsilon = " << epsilon
               << ", actor_iter = " << dqn.actor_iter()
               << ", critic_iter = " << dqn.critic_iter()
               << ", replay_mem_size = " << dqn.memory_size();
+    if (FLAGS_warp_action) {
+      LOG(INFO) << "Episode " << episode << ", warp_level = " << warp_level;
+      warp_level *= result.first > 0 ? 2.0 : 0.5; // Warp to 50% success rate
+    }
     episode++;
     if (dqn.actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
       double avg_score = Evaluate(hfo, dqn);
