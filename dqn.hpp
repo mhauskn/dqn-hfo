@@ -162,7 +162,7 @@ protected:
                            float* target_input,
                            float* filter_input);
 
-protected:
+ protected:
   caffe::SolverParameter actor_solver_param_;
   caffe::SolverParameter critic_solver_param_;
   const int replay_memory_capacity_;

@@ -33,7 +33,7 @@ DEFINE_int32(actor_max_iter, 0, "Custom max iter of the actor.");
 DEFINE_int32(critic_max_iter, 0, "Custom max iter of the critic.");
 // Epsilon-Greedy Args
 DEFINE_int32(explore, 1000000, "Iterations for epsilon to reach given value.");
-DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
+DEFINE_double(epsilon, 0, "Value of epsilon after explore iterations.");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 // Evaluation Args
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
@@ -59,6 +59,7 @@ double CalculateEpsilon(const int iter) {
  */
 double PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn, const double epsilon,
                       const bool update) {
+  LOG(INFO) << "Play episode begins.";
   hfo.act({DASH, 0, 0});
   std::deque<dqn::StateDataSp> past_states;
   double total_score = 0;
@@ -237,7 +238,8 @@ int main(int argc, char** argv) {
   int episode = 0;
   double best_score = std::numeric_limits<double>::min();
   while (dqn.actor_iter() < actor_solver_param.max_iter() &&
-         dqn.critic_iter() < critic_solver_param.max_iter()) {
+         dqn.critic_iter() < critic_solver_param.max_iter() &&
+         dqn.memory_size() < 500000) {
     double epsilon = CalculateEpsilon(dqn.max_iter());
     double score = PlayOneEpisode(hfo, dqn, epsilon, true);
     LOG(INFO) << "Episode " << episode << " score = " << score
@@ -246,28 +248,29 @@ int main(int argc, char** argv) {
               << ", critic_iter = " << dqn.critic_iter()
               << ", replay_mem_size = " << dqn.memory_size();
     episode++;
-    if (dqn.actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
-      double avg_score = Evaluate(hfo, dqn);
-      if (avg_score > best_score) {
-        LOG(INFO) << "New High Score: " << avg_score
-                  << ", actor_iter = " << dqn.actor_iter()
-                  << ", critic_iter = " << dqn.critic_iter();
-        best_score = avg_score;
-        std::string fname = save_path.native() + "_HiScore" +
-            std::to_string(avg_score);
-        dqn.Snapshot(fname, false, false);
-      }
-      last_eval_iter = dqn.actor_iter();
-    }
-    if (dqn.max_iter() >= last_snapshot_iter + FLAGS_snapshot_freq) {
-      dqn.Snapshot(save_path.native(), true, true);
-      last_snapshot_iter = dqn.max_iter();
-    }
+    // if (dqn.actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
+    //   double avg_score = Evaluate(hfo, dqn);
+    //   if (avg_score > best_score) {
+    //     LOG(INFO) << "New High Score: " << avg_score
+    //               << ", actor_iter = " << dqn.actor_iter()
+    //               << ", critic_iter = " << dqn.critic_iter();
+    //     best_score = avg_score;
+    //     std::string fname = save_path.native() + "_HiScore" +
+    //         std::to_string(avg_score);
+    //     dqn.Snapshot(fname, false, false);
+    //   }
+    //   last_eval_iter = dqn.actor_iter();
+    // }
+    // if (dqn.max_iter() >= last_snapshot_iter + FLAGS_snapshot_freq) {
+    //   dqn.Snapshot(save_path.native(), true, true);
+    //   last_snapshot_iter = dqn.max_iter();
+    // }
   }
-  if (dqn.actor_iter() > last_eval_iter) {
-    Evaluate(hfo, dqn);
-  }
-  if (dqn.max_iter() > last_snapshot_iter) {
-    dqn.Snapshot(save_path.native(), true, true);
-  }
+  dqn.Snapshot(save_path.native(), true, true);
+  // if (dqn.actor_iter() > last_eval_iter) {
+  //   Evaluate(hfo, dqn);
+  // }
+  // if (dqn.max_iter() > last_snapshot_iter) {
+  //   dqn.Snapshot(save_path.native(), true, true);
+  // }
 };
