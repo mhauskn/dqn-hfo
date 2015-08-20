@@ -20,7 +20,7 @@ DEFINE_bool(gui, false, "Open a GUI window");
 DEFINE_bool(benchmark, false, "Benchmark the network and exit");
 // Load/Save Args
 DEFINE_string(save, "", "Prefix for saving snapshots");
-DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.");
+DEFINE_string(resume, "", "Prefix for resuming from. Default=save_path");
 DEFINE_string(actor_solver, "actor_solver.prototxt", "Actor solver (*.prototxt)");
 DEFINE_string(critic_solver, "critic_solver.prototxt", "Critic solver (*.prototxt)");
 DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemodel).");
@@ -46,7 +46,9 @@ DEFINE_string(server_cmd, "./scripts/start.py --offense-agents 1 --fullstate",
 DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
 DEFINE_bool(warp_action, false, "Warp actions in direction of critic improvment.");
-
+DEFINE_bool(learn_online, true, "Update while playing. Otherwise just calls update.");
+DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
+DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -148,8 +150,8 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   }
   score_stddev = sqrt(score_stddev / static_cast<double>(FLAGS_repeat_games - 1));
   steps_stddev = sqrt(steps_stddev / static_cast<double>(FLAGS_repeat_games - 1));
-  LOG(INFO) << "Evaluation avg_score = " << avg_score << ", std = " << score_stddev
-            << ", avg_steps = " << avg_steps << ", std = " << steps_stddev;
+  LOG(INFO) << "Evaluation avg_score = " << avg_score << ", score_std = " << score_stddev
+            << ", avg_steps = " << avg_steps << ", steps_std = " << steps_stddev;
   return avg_score;
 }
 
@@ -189,10 +191,18 @@ int main(int argc, char** argv) {
 
   // Look for a recent snapshot to resume
   LOG(INFO) << "Save path: " << save_path.native();
-  if (FLAGS_resume && FLAGS_actor_snapshot.empty()
-      && FLAGS_critic_snapshot.empty() && FLAGS_memory_snapshot.empty()) {
-    dqn::FindLatestSnapshot(save_path.native(), FLAGS_actor_snapshot,
-                            FLAGS_critic_snapshot, FLAGS_memory_snapshot);
+  std::string resume_path = FLAGS_resume.empty() ? save_path.native() : FLAGS_resume;
+  std::string last_actor_snapshot, last_critic_snapshot, last_memory_snapshot;
+  dqn::FindLatestSnapshot(resume_path, last_actor_snapshot,
+                          last_critic_snapshot, last_memory_snapshot);
+  if (FLAGS_critic_snapshot.empty() && FLAGS_critic_weights.empty()) {
+    FLAGS_critic_snapshot = last_critic_snapshot;
+  }
+  if (FLAGS_actor_snapshot.empty() && FLAGS_actor_weights.empty()) {
+    FLAGS_actor_snapshot = last_actor_snapshot;
+  }
+  if (FLAGS_memory_snapshot.empty()) {
+    FLAGS_memory_snapshot = last_memory_snapshot;
   }
 
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
@@ -263,19 +273,23 @@ int main(int argc, char** argv) {
   double best_score = std::numeric_limits<double>::min();
   while (dqn.actor_iter() < actor_solver_param.max_iter() &&
          dqn.critic_iter() < critic_solver_param.max_iter()) {
-    double epsilon = CalculateEpsilon(dqn.max_iter());
-    std::pair<double,int> result = PlayOneEpisode(hfo, dqn, epsilon, true, warp_level);
-    LOG(INFO) << "Episode " << episode << " score = " << result.first
-              << ", steps = " << result.second
-              << ", epsilon = " << epsilon
-              << ", actor_iter = " << dqn.actor_iter()
-              << ", critic_iter = " << dqn.critic_iter()
-              << ", replay_mem_size = " << dqn.memory_size();
-    if (FLAGS_warp_action) {
-      LOG(INFO) << "Episode " << episode << ", warp_level = " << warp_level;
-      warp_level *= result.first > 0 ? 2.0 : 0.5; // Warp to 50% success rate
+    if (FLAGS_learn_online) {
+      double epsilon = CalculateEpsilon(dqn.max_iter());
+      std::pair<double,int> result = PlayOneEpisode(hfo, dqn, epsilon, true, warp_level);
+      LOG(INFO) << "Episode " << episode << " score = " << result.first
+                << ", steps = " << result.second
+                << ", epsilon = " << epsilon
+                << ", actor_iter = " << dqn.actor_iter()
+                << ", critic_iter = " << dqn.critic_iter()
+                << ", replay_mem_size = " << dqn.memory_size();
+      if (FLAGS_warp_action) {
+        LOG(INFO) << "Episode " << episode << ", warp_level = " << warp_level;
+        warp_level *= result.first > 0 ? 2.0 : 0.5; // Warp to 50% success rate
+      }
+      episode++;
+    } else {
+      dqn.Update();
     }
-    episode++;
     if (dqn.actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
       double avg_score = Evaluate(hfo, dqn);
       if (avg_score > best_score) {
@@ -290,7 +304,7 @@ int main(int argc, char** argv) {
       last_eval_iter = dqn.actor_iter();
     }
     if (dqn.max_iter() >= last_snapshot_iter + FLAGS_snapshot_freq) {
-      dqn.Snapshot(save_path.native(), true, true);
+      dqn.Snapshot(save_path.native(), FLAGS_remove_old_snapshots, FLAGS_snapshot_memory);
       last_snapshot_iter = dqn.max_iter();
     }
   }
@@ -298,6 +312,6 @@ int main(int argc, char** argv) {
     Evaluate(hfo, dqn);
   }
   if (dqn.max_iter() > last_snapshot_iter) {
-    dqn.Snapshot(save_path.native(), true, true);
+    dqn.Snapshot(save_path.native(), FLAGS_remove_old_snapshots, FLAGS_snapshot_memory);
   }
 };
