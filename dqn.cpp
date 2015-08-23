@@ -26,6 +26,7 @@ DEFINE_int32(memory_threshold, 10000, "Number of transitions to start learning")
 DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_bool(update_actor, true, "Perform updates on actor.");
 DEFINE_bool(update_critic, true, "Perform updates on critic.");
+DEFINE_int32(critic_updates_per_actor_update, 1000, "Num updates to critic for each actor update.");
 DEFINE_double(q_diff, -1.0, "Diff at Critic's Q-Values layer.");
 
 template <typename Dtype>
@@ -428,6 +429,31 @@ ActorOutput DQN::SelectAction(const InputStates& last_states, const double epsil
   return SelectActions(std::vector<InputStates>{{last_states}}, epsilon)[0];
 }
 
+ActorOutput DQN::WarpAction(const InputStates& input_states, const ActorOutput& action,
+                            float min_gain, float max_gain) {
+  ActorOutput warped_action = action;
+  float q_value = CriticForward(*critic_net_, {{input_states}}, {{action}})[0];
+  const auto q_values_blob = critic_net_->blob_by_name(q_values_blob_name);
+  float* q_values_diff = q_values_blob->mutable_cpu_diff();
+  q_values_diff[q_values_blob->offset(0,0,0,0)] = FLAGS_q_diff;
+  critic_net_->BackwardFrom(GetLayerIndex(*critic_net_, q_values_layer_name));
+  const auto critic_actions_blob = critic_net_->blob_by_name(actions_blob_name);
+  const auto critic_action_params_blob = critic_net_->blob_by_name(action_params_blob_name);
+  float gain = std::uniform_real_distribution<float>(min_gain, max_gain)(random_engine);
+  VLOG(1) << "ActorOutput [Original] [Diff]: ";
+  for (int c = 0; c < kActionSize; ++c) {
+    warped_action[c] -= gain * critic_actions_blob->diff_at(0,0,c,0);
+    VLOG(1) << "  " << action[c] << " " << critic_actions_blob->diff_at(0,0,c,0);
+  }
+  for (int c = 0; c < kActionParamSize; ++c) {
+    warped_action[kActionSize + c] -= gain * critic_action_params_blob->diff_at(0,0,c,0);
+    VLOG(1) << "  " << action[kActionSize+c] << " " << critic_action_params_blob->diff_at(0,0,c,0);
+  }
+  float warped_q_value = CriticForward(*critic_net_, {{input_states}}, {{warped_action}})[0];
+  VLOG(1) << "Original Q-Value: " << q_value << ", Warped Q-Value: " << warped_q_value;
+  return warped_action;
+}
+
 float DQN::EvaluateAction(const InputStates& input_states,
                           const ActorOutput& actor_output) {
   return CriticForward(*critic_net_,
@@ -467,6 +493,7 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   CHECK(actor.has_blob(action_params_blob_name));
   CHECK_LE(states_batch.size(), kMinibatchSize);
   std::vector<float> states_input(kStateInputDataSize, 0.0f);
+  // std::vector<float> target_input(kTargetInputDataSize, 0.0f);
   const auto states_blob = actor.blob_by_name(states_blob_name);
   for (int n = 0; n < states_batch.size(); ++n) {
     for (int c = 0; c < kStateInputCount; ++c) {
@@ -515,14 +542,17 @@ void DQN::Update() {
     }
     smoothed_critic_loss_ += loss / float(FLAGS_loss_display_iter);
   }
-  if (FLAGS_update_actor) {
-    float diff = UpdateActor();
+  if (FLAGS_update_actor) { // &&
+      // critic_iter() % FLAGS_critic_updates_per_actor_update == 0) {
+    float avg_q = UpdateActor();
+    // LOG(INFO) << "Actor Iteration " << actor_iter()
+    //           << ", avg_q_value = " << avg_q;
     if (actor_iter() % FLAGS_loss_display_iter == 0) {
       LOG(INFO) << "Actor Iteration " << actor_iter()
-                << ", diff = " << smoothed_actor_loss_;
+                << ", avg_q_value = " << smoothed_actor_loss_;
       smoothed_actor_loss_ = 0;
     }
-    smoothed_actor_loss_ += diff / float(FLAGS_loss_display_iter);
+    smoothed_actor_loss_ += avg_q / float(FLAGS_loss_display_iter);
   }
 }
 
@@ -607,7 +637,7 @@ float DQN::UpdateCritic() {
   auto target_value_idx = 0;
   for (int n = 0; n < kMinibatchSize; ++n) {
     const auto& transition = replay_memory_[transitions[n]];
-    const ActorOutput& actor_output = std::get<1>(transition);
+    ActorOutput actor_output = std::get<1>(transition);
     const float reward = std::get<2>(transition);
     CHECK(reward >= -1.0 && reward <= 1.0);
     const auto target = std::get<3>(transition) ?
@@ -619,8 +649,11 @@ float DQN::UpdateCritic() {
       std::copy(state_data->begin(), state_data->end(),
                 states_input.begin() + states_blob->offset(n,c,0,0));
     }
-    std::copy(actor_output.begin(), actor_output.begin() + kActionSize,
-              action_input.begin() + action_blob->offset(n,0,0,0));
+    // std::copy(actor_output.begin(), actor_output.begin() + kActionSize,
+    //           action_input.begin() + action_blob->offset(n,0,0,0));
+    for(int i = 5; i < kActionSize + kActionParamSize; ++i) {
+      actor_output[i] = 0;
+    }
     std::copy(actor_output.begin() + kActionSize, actor_output.end(),
               action_params_input.begin() + action_params_blob->offset(n,0,0,0));
   }
@@ -646,6 +679,7 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   CHECK(critic.has_blob(action_params_blob_name));
   CHECK(actor_net_->has_blob(actions_blob_name));
   CHECK(actor_net_->has_blob(action_params_blob_name));
+  const auto states_blob = actor_net_->blob_by_name(states_blob_name);
   const auto q_values_blob = critic.blob_by_name(q_values_blob_name);
   const auto critic_actions_blob = critic.blob_by_name(actions_blob_name);
   const auto critic_action_params_blob = critic.blob_by_name(action_params_blob_name);
@@ -665,38 +699,100 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   }
   DLOG(INFO) << " [Backwards] " << critic.name();
   critic.BackwardFrom(GetLayerIndex(critic, q_values_layer_name));
+  // float action_diff = critic_actions_blob->asum_diff() / critic_actions_blob->count();
+  // float ap_diff = critic_action_params_blob->asum_diff() / critic_action_params_blob->count();
 
-  float action_diff = critic_actions_blob->asum_diff()
-      / critic_actions_blob->count();
-  // LOG(INFO) << "Critic Action Blob Diff: " << diff_abs_val_mean;
-  float action_param_diff = critic_action_params_blob->asum_diff()
-      / critic_action_params_blob->count();
-  // LOG(INFO) << "Critic Action Params Blob Diff: " << diff_abs_val_mean;
+  // Option 1: Transfer input-level diffs from Critic to Actor
 
-  // Transfer input-level diffs from Critic to Actor
-  actor_actions_blob->ShareDiff(*critic_actions_blob);
-  actor_action_params_blob->ShareDiff(*critic_action_params_blob);
-
+  // actor_actions_blob->ShareDiff(*critic_actions_blob);
+  // actor_action_params_blob->ShareDiff(*critic_action_params_blob);
+  // Set the dash power diff in actor network
+  float* actor_action_params_diff = actor_action_params_blob->mutable_cpu_diff();
+  float* actor_actions_diff = actor_actions_blob->mutable_cpu_diff();
+  for (int i = 0; i < kMinibatchSize; i++) {
+    actor_action_params_diff[actor_action_params_blob->offset(i, 0, 0, 0)] =
+        critic_action_params_blob->diff_at(i, 0, 0, 0);
+    for (int j = 1; j < kActionParamSize; ++j) {
+      actor_action_params_diff[actor_action_params_blob->offset(i, j, 0, 0)] = 0;
+    }
+    for (int j = 0; j < kActionSize; ++j) {
+      actor_actions_diff[actor_actions_blob->offset(i, j, 0, 0)] = 0;
+    }
+  }
   DLOG(INFO) << " [Backwards] " << actor_net_->name();
   actor_net_->Backward();
   actor_solver_->ComputeUpdateValue();
   actor_solver_->set_iter(actor_solver_->iter() + 1);
   actor_net_->Update();
 
-  std::vector<float> new_q_values = CriticForwardThroughActor(critic, states_batch);
-  float avg_q = 0, post_avg_q = 0, avg_q_diff = 0;
-  float sz = float(q_values.size());
-  for (int i=0; i<q_values.size(); ++i) {
-    avg_q += q_values[i] / sz;
-    post_avg_q += new_q_values[i] / sz;
-    avg_q_diff = (new_q_values[i] - q_values[i]) / sz;
-  }
-  VLOG(1) << "Iter " << actor_iter()
-          << ", PreUpdateAvgQ = " << avg_q
-          << ", PostUpdateAvgQ = " << post_avg_q
-          << ", AvgQDiff = " << avg_q_diff;
+  // Option 2: Converts Critic Diff --> Softmax Label
+  // Find the index of the action the critic most wants to take
+  // std::vector<float> states_input(kStateInputDataSize, 0.0f);
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   for (int c = 0; c < kStateInputCount; ++c) {
+  //     const auto& state_data = states_batch[n][c];
+  //     std::copy(state_data->begin(), state_data->end(),
+  //               states_input.begin() + states_blob->offset(n,c,0,0));
+  //   }
+  // }
+  // std::vector<float> target_input(kTargetInputDataSize, 0.0f);
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   float min_elem = critic_actions_blob->diff_at(n,0,0,0);
+  //   int min_indx = 0;
+  //   for (int h = 1; h < kActionSize; ++h) {
+  //     float diff = critic_actions_blob->diff_at(n,0,h,0);
+  //     if (diff < min_elem) {
+  //       min_elem = diff;
+  //       min_indx = h;
+  //     }
+  //   }
+  //   target_input[n] = min_indx;
+  // }
+  // InputDataIntoLayers(*actor_net_, states_input.data(), NULL, NULL, target_input.data(), NULL);
+  // actor_solver_->Step(1);
 
-  return action_diff;
+  // Option 3: Only set diffs of parameters for the actions that are being taken
+  // float* actor_action_diff = actor_actions_blob->mutable_cpu_diff();
+  // float* actor_action_param_diff = actor_action_params_blob->mutable_cpu_diff();
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   Action a = GetAction(actor_output_batch[n]);
+  //   int p1 = GetParamOffset(a.action, 0);
+  //   actor_action_param_diff[actor_action_params_blob->offset(n,p1,0,0)] =
+  //       critic_action_params_blob->diff_at(n,0,p1,0);
+  //   int p2 = GetParamOffset(a.action, 1);
+  //   if (p2 >= 0) {
+  //     actor_action_param_diff[actor_action_params_blob->offset(n,p2,0,0)] =
+  //         critic_action_params_blob->diff_at(n,0,p2,0);
+  //   }
+  //   // for (int a = 0; a < kActionSize; ++a) {
+  //   //   actor_action_diff[actor_actions_blob->offset(n,a,0,0)] =
+  //   //       critic_actions_blob->diff_at(n,0,a,0);
+  //   // }
+  //   // for (int p = 0; p < kActionParamSize; ++p) {
+  //   //   actor_action_param_diff[actor_action_params_blob->offset(n,p,0,0)] =
+  //   //       critic_action_params_blob->diff_at(n,0,p,0);
+  //   // }
+  // }
+  // DLOG(INFO) << " [Backwards] " << actor_net_->name();
+  // actor_net_->Backward();
+  // actor_solver_->ComputeUpdateValue();
+  // actor_solver_->set_iter(actor_solver_->iter() + 1);
+  // actor_net_->Update();
+
+  // std::vector<float> new_q_values = CriticForwardThroughActor(critic, states_batch);
+  // float avg_q = 0, post_avg_q = 0, avg_q_diff = 0;
+  // float sz = float(q_values.size());
+  // for (int i=0; i<q_values.size(); ++i) {
+  //   avg_q += q_values[i] / sz;
+  //   post_avg_q += new_q_values[i] / sz;
+  //   avg_q_diff = (new_q_values[i] - q_values[i]) / sz;
+  // }
+  // VLOG(1) << "Iter " << actor_iter()
+  //         << ", PreUpdateAvgQ = " << avg_q
+  //         << ", PostUpdateAvgQ = " << post_avg_q
+  //         << ", AvgQDiff = " << avg_q_diff;
+
+  return std::accumulate(q_values.begin(), q_values.end(), 0.0) / float(q_values.size());
 }
 
 std::vector<float> DQN::CriticForwardThroughActor(
@@ -729,9 +825,12 @@ std::vector<float> DQN::CriticForward(caffe::Net<float>& critic,
       std::copy(state_data->begin(), state_data->end(),
                 states_input.begin() + states_blob->offset(n,c,0,0));
     }
-    const ActorOutput& actor_output = action_batch[n];
-    std::copy(actor_output.begin(), actor_output.begin() + kActionSize,
-              action_input.begin() + actions_blob->offset(n,0,0,0));
+    ActorOutput actor_output = action_batch[n];
+    // std::copy(actor_output.begin(), actor_output.begin() + kActionSize,
+    //           action_input.begin() + actions_blob->offset(n,0,0,0));
+    for(int i = 5; i < kActionSize + kActionParamSize; ++i) {
+      actor_output[i] = 0;
+    }
     std::copy(actor_output.begin() + kActionSize, actor_output.end(),
               action_params_input.begin() + action_params_blob->offset(n,0,0,0));
   }
@@ -844,19 +943,19 @@ void DQN::SnapshotReplayMemory(const std::string& filename) {
 void DQN::LoadReplayMemory(const std::string& filename) {
   CHECK(boost::filesystem::is_regular_file(filename)) << "Invalid file: " << filename;
   LOG(INFO) << "Loading replay memory from " << filename;
-  ClearReplayMemory();
   std::ifstream ifile(filename.c_str(),
                       std::ios_base::in | std::ofstream::binary);
   boost::iostreams::filtering_istream in;
   in.push(boost::iostreams::gzip_decompressor());
   in.push(ifile);
   int num_transitions;
+  int initial_memory_size = memory_size();
   in.read((char*)&num_transitions, sizeof(int));
-  replay_memory_.resize(num_transitions);
+  replay_memory_.resize(initial_memory_size + num_transitions);
   std::deque<dqn::StateDataSp> past_states;
   int episodes = 0;
   bool terminal = true;
-  for (int i = 0; i < num_transitions; ++i) {
+  for (int i = initial_memory_size; i < initial_memory_size + num_transitions; ++i) {
     Transition& t = replay_memory_[i];
     if (terminal) {
       past_states.clear();
@@ -878,14 +977,16 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     in.read((char*)&std::get<1>(t), sizeof(ActorOutput));
     in.read((char*)&std::get<2>(t), sizeof(float));
     std::get<3>(t) = boost::none;
-    if (i > 0 && !terminal) { // Set the next state for the last transition
+    if (i > initial_memory_size && !terminal) {
+      // Set the next state for the last transition
       std::get<3>(replay_memory_[i-1]) = state;
     }
     in.read((char*)&terminal, sizeof(bool));
     if (terminal) { episodes++; };
   }
-  LOG(INFO) << "replay_mem_size = " << memory_size() << " with "
+  LOG(INFO) << "loaded transitions = " << num_transitions << " with "
             << episodes << " episodes";
+  LOG(INFO) << "replaymemory_size = " << memory_size();
 }
 
 }

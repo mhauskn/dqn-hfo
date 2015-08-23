@@ -85,6 +85,12 @@ public:
   std::vector<ActorOutput> SelectActions(const std::vector<InputStates>& states_batch,
                                          double epsilon);
 
+  // Warps an action according to the gradients provided by the
+  // critic. The degree of warping is determined by a gain sampled
+  // uniformly from the range [min_gain, max_gain].
+  ActorOutput WarpAction(const InputStates& input_states, const ActorOutput& action,
+                         float min_gain=0, float max_gain=100);
+
   // Evaluate a state-action, returning the q-value.
   float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
 
@@ -101,6 +107,12 @@ public:
 
   // Update the model(s)
   void Update();
+
+  // Update DQN using one minibatch. Returns the loss.
+  float UpdateCritic();
+
+  // Updates the actor against the critic_net_. Returns diff from critic.
+  float UpdateActor();
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
@@ -120,10 +132,6 @@ protected:
   // Initialize DQN. Called by the constructor
   void Initialize();
 
-  // Update DQN using one minibatch. Returns the loss.
-  float UpdateCritic();
-  // Updates the actor against the critic_net_. Returns diff from critic.
-  float UpdateActor();
   // Update the actor network from the gradients provided by the critic
   float UpdateActor(caffe::Net<float>& critic);
 
