@@ -49,6 +49,8 @@ DEFINE_int32(port, 7000, "Port to use for server/client.");
 DEFINE_bool(warp_action, false, "Warp actions in direction of critic improvment.");
 // Train Only With ReplayMemory
 DEFINE_bool(pure_train, false, "Only update with the existing replaymemory");
+// Evaluate critic critic network
+DEFINE_bool(evaluate_critic, false, "evaluate the avg_q_values of fast and slow episodes");
 
 
 double CalculateEpsilon(const int iter) {
@@ -267,6 +269,11 @@ int main(int argc, char** argv) {
   if (FLAGS_benchmark) {
     PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true, -1);
     dqn.Benchmark(1000);
+    return 0;
+  }
+
+  if (FLAGS_evaluate_critic) {
+    dqn.EvaluateCritic();
     return 0;
   }
 

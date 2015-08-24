@@ -224,11 +224,14 @@ void DQN::Benchmark(int iterations) {
 }
 
 // Randomly sample the replay memory n times, returning the indexes
-std::vector<int> DQN::SampleTransitionsFromMemory(int n) {
+std::vector<int> DQN::SampleTransitionsFromMemory(int n, int idx_l, int idx_h) {
+  CHECK_LE(0, idx_l);
+  CHECK_LE(idx_l, idx_h);
+  CHECK_LE(idx_h, replay_memory_.size()-1);
   std::vector<int> transitions(n);
   for (int i = 0; i < n; ++i) {
     transitions[i] =
-        std::uniform_int_distribution<int>(0, replay_memory_.size() - 1)(
+        std::uniform_int_distribution<int>(idx_l, idx_h)(
             random_engine);
   }
   return transitions;
@@ -236,7 +239,7 @@ std::vector<int> DQN::SampleTransitionsFromMemory(int n) {
 
 std::vector<InputStates> DQN::SampleStatesFromMemory(int n) {
   std::vector<InputStates> states_batch(n);
-  std::vector<int> transitions = SampleTransitionsFromMemory(n);
+  std::vector<int> transitions = SampleTransitionsFromMemory(n, 0 , memory_size() - 1);
   for (int i = 0; i < n; ++i) {
     const auto& transition = replay_memory_[transitions[i]];
     InputStates last_states;
@@ -613,7 +616,7 @@ float DQN::UpdateCritic() {
     CloneNet(critic_net_, critic_target_net_);
   }
   // Collect a batch of next-states used to generate target_q_values
-  std::vector<int> transitions = SampleTransitionsFromMemory(kMinibatchSize);
+  std::vector<int> transitions = SampleTransitionsFromMemory(kMinibatchSize, 0, memory_size() - 1);
   std::vector<InputStates> target_states_batch;
   for (const auto idx : transitions) {
     const auto& transition = replay_memory_[idx];
@@ -987,6 +990,63 @@ void DQN::LoadReplayMemory(const std::string& filename) {
   LOG(INFO) << "loaded transitions = " << num_transitions << " with "
             << episodes << " episodes";
   LOG(INFO) << "replaymemory_size = " << memory_size();
+}
+
+void DQN::EvaluateCritic() {
+  std::vector<InputStates> states_batch(kMinibatchSize);
+  std::vector<ActorOutput> action_batch(kMinibatchSize);
+
+  float smoothed_fast = 0, smoothed_slow = 0;
+  int times = 1000;
+
+  // fast dash
+  for (int t = 0; t < times; t++) {
+    std::vector<int> fast_transitions = SampleTransitionsFromMemory(32, 0, 500000);
+    for (int i = 0; i < kMinibatchSize; ++i) {
+      const auto& transition = replay_memory_[fast_transitions[i]];
+      ActorOutput actor_output = std::get<1>(transition);
+      for (int j = 0; j < 4; j++) { actor_output[j] = 0; }
+      for (int j = 5; j < 10; j++) { actor_output[j] = 0; }
+      action_batch[i] = actor_output;
+      InputStates last_states;
+      for (int j = 0; j < kStateInputCount; ++j) {
+        last_states[j] = std::get<0>(transition)[j];
+      }
+      states_batch[i] = last_states;
+    }
+
+    std::vector<float> fast_q_values = CriticForward(*critic_net_, states_batch, action_batch);
+    float fast_q_value_avg = std::accumulate(fast_q_values.begin(), fast_q_values.end(), 0.0) / float(fast_q_values.size());
+    smoothed_fast += fast_q_value_avg / times;
+  }
+  LOG(INFO) << "fast dash : avg_q_value in " << times * kMinibatchSize
+            << " transitions is " << smoothed_fast;
+
+
+    // slow dash
+  for (int t = 0; t < times; t++) {
+    std::vector<int> slow_transitions =
+        SampleTransitionsFromMemory(32, 500500, 1000000);
+    for (int i = 0; i < kMinibatchSize; ++i) {
+      const auto& transition = replay_memory_[slow_transitions[i]];
+      ActorOutput actor_output = std::get<1>(transition);
+      for (int j = 0; j < 4; j++) { actor_output[j] = 0; }
+      for (int j = 5; j < 10; j++) { actor_output[j] = 0; }
+      action_batch[i] = actor_output;
+      InputStates last_states;
+      for (int j = 0; j < kStateInputCount; ++j) {
+        last_states[j] = std::get<0>(transition)[j];
+      }
+      states_batch[i] = last_states;
+    }
+
+    std::vector<float> slow_q_values = CriticForward(*critic_net_, states_batch, action_batch);
+    float slow_q_value_avg = std::accumulate(slow_q_values.begin(), slow_q_values.end(), 0.0) / float(slow_q_values.size());
+    smoothed_slow += slow_q_value_avg / times;
+  }
+  LOG(INFO) << "slow dash : avg_q_value in " << times * kMinibatchSize
+            << " transitions is " << smoothed_slow;
+
 }
 
 }

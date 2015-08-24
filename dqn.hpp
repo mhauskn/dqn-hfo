@@ -114,6 +114,9 @@ public:
   // Updates the actor against the critic_net_. Returns diff from critic.
   float UpdateActor();
 
+  // Compare the q_values in slow and fast dash
+  void EvaluateCritic();
+
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_.clear(); }
 
@@ -136,7 +139,7 @@ protected:
   float UpdateActor(caffe::Net<float>& critic);
 
   // Randomly sample the replay memory n-times, returning transition indexes
-  std::vector<int> SampleTransitionsFromMemory(int n);
+  std::vector<int> SampleTransitionsFromMemory(int n, int idx_l, int idx_h);
   // Randomly sample the replay memory n-times returning input_states
   std::vector<InputStates> SampleStatesFromMemory(int n);
 
