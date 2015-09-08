@@ -9,6 +9,12 @@
 # ACTOR_SOLVER="dqn_actor_solver3.prototxt"
 # cluster --gpu --prefix $PREFIX ./dqn -save=$SAVE -mimic -mimic_data=$MIMICDATA_FAST -epochs=30 -actor_solver=$ACTOR_SOLVER
 
+# mimic 1v1 game
+PREFIX="state/job"
+SAVE="state/"
+MIMICDATA="1v1/agent.log"
+ACTOR_SOLVER="dqn_actor_solver.prototxt"
+cluster --prefix $PREFIX ./dqn -save=$SAVE -mimic -mimic_data=$MIMICDATA -epochs=30 -actor_solver=$ACTOR_SOLVER
 
 # evaluate the given agent's performance
 # PREFIX="state/Handcoded_Evaluate_job"
@@ -19,13 +25,13 @@
 # PORT=10000
 # cluster --gpu --prefix $PREFIX ./dqn -evaluate -save=$SAVE -actor_weights=$ACTOR_WEIGHTS -critic_weights=$CRITIC_WEIGHTS -actor_solver=$ACTOR_SOLVER -repeat_games=200 -port=$PORT
 
-PREFIX="state2/job"
-SAVE="state2/"
-ACTOR_SOLVER="dqn_actor_solver.prototxt"
-ACTOR_WEIGHTS="train_result/8_14_current_model_trained_on_1v1/_actor_iter_843751.caffemodel"
-CRITIC_WEIGHTS="train_result/8_14_current_model_trained_on_1v1/_critic_iter_1.caffemodel"
-PORT=6000
-cluster --gpu --prefix $PREFIX ./dqn -evaluate -save=$SAVE -actor_weights=$ACTOR_WEIGHTS -critic_weights=$CRITIC_WEIGHTS -actor_solver=$ACTOR_SOLVER -repeat_games=100 -port=$PORT
+# PREFIX="state/job"
+# SAVE="state/"
+# ACTOR_SOLVER="dqn_actor_solver.prototxt"
+# ACTOR_WEIGHTS="train_result/8_14_current_model_trained_on_1v1/_actor_iter_843751.caffemodel"
+# CRITIC_WEIGHTS="train_result/8_14_current_model_trained_on_1v1/_critic_iter_1.caffemodel"
+# PORT=6000
+# cluster --gpu --prefix $PREFIX ./dqn -evaluate -save=$SAVE -actor_weights=$ACTOR_WEIGHTS -critic_weights=$CRITIC_WEIGHTS -actor_solver=$ACTOR_SOLVER -repeat_games=100 -port=$PORT
 
 # PREFIX="state3/Agent2D_on_1v1_job"
 # SAVE="state3/"

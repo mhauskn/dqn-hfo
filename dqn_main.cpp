@@ -36,7 +36,8 @@ DEFINE_bool(resume, true, "Automatically resume training from latest snapshot.")
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_bool(evaluate_with_comparison, false,
             "Evatluation with Comparation mode: evaluate agent2D, trained agent and handcraft agent");
-DEFINE_bool(delay_reward, true, "If false will skip the timesteps between shooting EOT. ");
+DEFINE_bool(delay_reward, true, "If fals
+e will skip the timesteps between shooting EOT. ");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 DEFINE_int32(evaluate_freq, 2500000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 32, "Number of games played in evaluation mode");
@@ -49,7 +50,7 @@ DEFINE_string(critic_solver, "dqn_critic_solver.prototxt",
 DEFINE_string(server_cmd,
               "./scripts/start.py --offense-agents 1 --offense-npcs 0 --defense-agents 0 --defense-npcs 1 --record",
               "Command executed to start the HFO server.");
-DEFINE_int32(port, 6010, "Port to use for server/client.");
+DEFINE_int32(port, 6500, "Port to use for server/client.");
 DEFINE_int32(seed, 1, "Seed the trainer's RNG");
 DEFINE_string(mimic_data, "1v1/agent.log", "The mimic state-action train data to load (*.log)");
 DEFINE_bool(mimic, false, "Mimic mode: mimic agent2D by training the network with mimic_data");
@@ -366,8 +367,9 @@ void TrainMimic(dqn::DQN& dqn, path save_path) {
               << deviation_test[4] / accuracy_test[3].first
               << " test_kick_deviation2 : "
               << deviation_test[5] / accuracy_test[3].first;
+    dqn.Snapshot(save_path.native(), true, false);
   }
-  dqn.Snapshot(save_path.native(), false, false);
+  dqn.Snapshot(save_path.native(), true, false);
 }
 
 int main(int argc, char** argv) {

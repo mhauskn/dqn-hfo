@@ -8,7 +8,7 @@ layer {
   memory_data_param {
     batch_size: 32
     channels: 1
-    height: 58
+    height: 66
     width: 1
   }
 }
@@ -57,12 +57,78 @@ layer {
   bottom: "dummy4"
 }
 layer {
-  name: "ip1_layer"
+  name: "ip-1_layer"
   type: "InnerProduct"
   bottom: "states"
-  top: "ip1"
+  top: "ip-1"
   inner_product_param {
     num_output: 1000
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "ip-1_relu_layer"
+  type: "ReLU"
+  bottom: "ip-1"
+  top: "ip-1"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "ip0_layer"
+  type: "InnerProduct"
+  bottom: "ip-1"
+  top: "ip0"
+  inner_product_param {
+    num_output: 512
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "ip0_relu_layer"
+  type: "ReLU"
+  bottom: "ip0"
+  top: "ip0"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "ip0.5_layer"
+  type: "InnerProduct"
+  bottom: "ip0"
+  top: "ip0.5"
+  inner_product_param {
+    num_output: 200
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+  }
+}
+layer {
+  name: "ip0.5_relu_layer"
+  type: "ReLU"
+  bottom: "ip0.5"
+  top: "ip0.5"
+  relu_param {
+    negative_slope: 0.01
+  }
+}
+layer {
+  name: "ip1_layer"
+  type: "InnerProduct"
+  bottom: "ip0.5"
+  top: "ip1"
+  inner_product_param {
+    num_output: 64
     weight_filler {
       type: "gaussian"
       std: 0.01
@@ -79,75 +145,9 @@ layer {
   }
 }
 layer {
-  name: "ip2_layer"
+  name: "ip2_action_layer"
   type: "InnerProduct"
   bottom: "ip1"
-  top: "ip2"
-  inner_product_param {
-    num_output: 512
-    weight_filler {
-      type: "gaussian"
-      std: 0.01
-    }
-  }
-}
-layer {
-  name: "ip2_relu_layer"
-  type: "ReLU"
-  bottom: "ip2"
-  top: "ip2"
-  relu_param {
-    negative_slope: 0.01
-  }
-}
-layer {
-  name: "ip3_layer"
-  type: "InnerProduct"
-  bottom: "ip2"
-  top: "ip3"
-  inner_product_param {
-    num_output: 200
-    weight_filler {
-      type: "gaussian"
-      std: 0.01
-    }
-  }
-}
-layer {
-  name: "ip3_relu_layer"
-  type: "ReLU"
-  bottom: "ip3"
-  top: "ip3"
-  relu_param {
-    negative_slope: 0.01
-  }
-}
-layer {
-  name: "ip4_layer"
-  type: "InnerProduct"
-  bottom: "ip3"
-  top: "ip4"
-  inner_product_param {
-    num_output: 64
-    weight_filler {
-      type: "gaussian"
-      std: 0.01
-    }
-  }
-}
-layer {
-  name: "ip4_relu_layer"
-  type: "ReLU"
-  bottom: "ip4"
-  top: "ip4"
-  relu_param {
-    negative_slope: 0.01
-  }
-}
-layer {
-  name: "action_layer"
-  type: "InnerProduct"
-  bottom: "ip4"
   top: "action"
   inner_product_param {
     num_output: 4
@@ -158,9 +158,9 @@ layer {
   }
 }
 layer {
-  name: "actionpara_layer"
+  name: "ip2_actionpara_layer"
   type: "InnerProduct"
-  bottom: "ip4"
+  bottom: "ip1"
   top: "actionpara"
   inner_product_param {
     num_output: 6
