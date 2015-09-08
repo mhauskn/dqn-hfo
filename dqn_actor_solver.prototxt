@@ -5,6 +5,6 @@ base_lr: 1
 lr_policy: "step"
 gamma: 0.5
 stepsize: 20000000
-max_iter: 500000000
+max_iter: 50000000
 display: 5000
 snapshot: 1000000
