@@ -18,7 +18,7 @@ constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kActionCount = 4;
 constexpr auto kActionparaCount = 6;
-constexpr auto kStateDataSize = 58;
+constexpr auto kStateDataSize = 66;
 
 constexpr auto kActorInputDataSize = kStateDataSize * kStateInputCount;
 constexpr auto kActorMinibatchDataSize = kActorInputDataSize * kMinibatchSize;
@@ -26,7 +26,7 @@ constexpr auto kActorMinibatchDataSize = kActorInputDataSize * kMinibatchSize;
 using ActorStateData = std::array<float, kStateDataSize>;
 using ActorStateDataSp = std::shared_ptr<ActorStateData>;
 using ActorInputStates = std::array<ActorStateDataSp, kStateInputCount>;
-using Transition = std::tuple<ActorInputStates, Action,
+using Transition = std::tuple<ActorInputStates, hfo::Action,
                               float, boost::optional<ActorStateDataSp>>;
 
 using StateLayerInputData = std::array<float, kActorMinibatchDataSize>;
@@ -85,10 +85,10 @@ public:
                 bool snapshot_memory=true);
 
   // Select an action by epsilon-greedy.
-  Action SelectAction(const ActorInputStates& input_states, double epsilon);
+  hfo::Action SelectAction(const ActorInputStates& input_states, double epsilon);
 
   // Select a batch of actions by epsilon-greedy.
-  std::vector<Action> SelectActions(const std::vector<ActorInputStates>& states_batch,
+  std::vector<hfo::Action> SelectActions(const std::vector<ActorInputStates>& states_batch,
                                  double epsilon);
 
   // Add a transition to replay memory
@@ -98,9 +98,10 @@ public:
   // void UpdateCritic();
 
   // update the actor network
-  std::pair<float,float> UpdateActor(int update_idx, bool update,
-                                     std::vector<std::pair<int, int>>& accuracy,
-                                     std::vector<float>& deviation);
+  void UpdateActor(int update_idx, bool update,
+                   std::vector<std::pair<int, int>>& accuracy,
+                   std::vector<float>& deviation,
+                   std::pair<float,float>& loss);
 
   // evaluate the actor network performance by loss
   void EvaluateActor(int evaluate_idx);
@@ -129,11 +130,11 @@ protected:
 
   // Given a set of input states and a network, select an
   // action. Returns the action and the estimated Q-Value.
-  Action SelectActionGreedily(caffe::Net<float>& net,
+  hfo::Action SelectActionGreedily(caffe::Net<float>& net,
                              const ActorInputStates& last_states);
 
   // Given a batch of input states, return a batch of selected actions + values.
-  std::vector<Action> SelectActionGreedily(
+  std::vector<hfo::Action> SelectActionGreedily(
       caffe::Net<float>& net,
       const std::vector<ActorInputStates>& last_states);
 
