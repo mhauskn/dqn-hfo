@@ -38,17 +38,14 @@ DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation 
 // Evaluation Args
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
-DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 // HFO Args
-DEFINE_string(server_cmd, "./scripts/start.py --offense-agents 1 --fullstate",
+DEFINE_string(server_cmd, "./scripts/start.py --offense-agents 1 --fullstate --seed 123",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
 DEFINE_bool(warp_action, false, "Warp actions in direction of critic improvment.");
 DEFINE_bool(learn_online, true, "Update while playing. Otherwise just calls update.");
-DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
-DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -63,7 +60,7 @@ double CalculateEpsilon(const int iter) {
  */
 std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
                                       const double epsilon,
-                                      const bool update, float warp_action) {
+                                      const bool update, float warp_level) {
   hfo.act({DASH, 0, 0});
   std::deque<dqn::StateDataSp> past_states;
   double total_score = 0;
@@ -84,12 +81,13 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
       dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
       dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
+      VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
       Action action = dqn::GetAction(actor_output);
       VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
               << " Action: " << hfo.ActionToString(action);
-      if (FLAGS_warp_action && warp_action > 0) {
+      if (FLAGS_warp_action && warp_level > 0) {
         const dqn::ActorOutput warped_output = dqn.WarpAction(
-            input_states, actor_output, 0.0, warp_action);
+            input_states, actor_output, 0.0, warp_level);
         const Action warped_action = dqn::GetAction(warped_output);
         VLOG(1) << "Warped Action: " << hfo.ActionToString(warped_action);
         actor_output = warped_output;
@@ -121,6 +119,21 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
   return std::make_pair(total_score, steps);
 }
 
+template <class T>
+std::pair<double,double> get_avg_std(std::vector<T> data) {
+  double sum = 0;
+  for (int i = 0; i < data.size(); ++i) {
+    sum += data[i];
+  }
+  double avg = sum / static_cast<double>(data.size());
+  double std = 0;
+  for (int i = 0; i < data.size(); ++i) {
+    std += (data[i] - avg) * (data[i] - avg);
+  }
+  std = sqrt(std / static_cast<double>(data.size() - 1));
+  return std::make_pair(avg, std);
+}
+
 /**
  * Evaluate the current player
  */
@@ -129,30 +142,26 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
             << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon;
   std::vector<double> scores;
   std::vector<int> steps;
+  std::vector<int> successful_trial_steps;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    std::pair<double,int> result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false, -1);
+    std::pair<double,int> result = PlayOneEpisode(
+        hfo, dqn, FLAGS_evaluate_with_epsilon, false, 0);
     scores.push_back(result.first);
     steps.push_back(result.second);
+    if (result.first > 0) {
+      successful_trial_steps.push_back(result.second);
+    }
   }
-  double total_score = 0.0;
-  double total_steps = 0.0;
-  for (int i = 0; i < scores.size(); ++i) {
-    total_score += scores[i];
-    total_steps += steps[i];
-  }
-  const auto avg_score = total_score / static_cast<double>(scores.size());
-  const auto avg_steps = total_steps / static_cast<double>(steps.size());
-  double score_stddev = 0.0; // Compute the sample standard deviation
-  double steps_stddev = 0.0;
-  for (int i = 0; i < scores.size(); ++i) {
-    score_stddev += (scores[i] - avg_score) * (scores[i] - avg_score);
-    steps_stddev += (steps[i] - avg_steps) * (steps[i] - avg_steps);
-  }
-  score_stddev = sqrt(score_stddev / static_cast<double>(FLAGS_repeat_games - 1));
-  steps_stddev = sqrt(steps_stddev / static_cast<double>(FLAGS_repeat_games - 1));
-  LOG(INFO) << "Evaluation avg_score = " << avg_score << ", score_std = " << score_stddev
-            << ", avg_steps = " << avg_steps << ", steps_std = " << steps_stddev;
-  return avg_score;
+  std::pair<double, double> score_dist = get_avg_std(scores);
+  std::pair<double, double> steps_dist = get_avg_std(steps);
+  std::pair<double, double> succ_steps_dist = get_avg_std(successful_trial_steps);
+  LOG(INFO) << "Evaluation avg_score = " << score_dist.first
+            << ", score_std = " << score_dist.second
+            << ", avg_steps = " << steps_dist.first
+            << ", steps_std = " << steps_dist.second
+            << ", success_avg_steps = " << succ_steps_dist.first
+            << ", success_steps_std = " << succ_steps_dist.second;
+  return score_dist.first;
 }
 
 int main(int argc, char** argv) {
@@ -195,6 +204,9 @@ int main(int argc, char** argv) {
   std::string last_actor_snapshot, last_critic_snapshot, last_memory_snapshot;
   dqn::FindLatestSnapshot(resume_path, last_actor_snapshot,
                           last_critic_snapshot, last_memory_snapshot);
+  LOG(INFO) << "Found Resumable(s): [" << resume_path << "] "
+            << last_actor_snapshot << ", " << last_critic_snapshot
+            << ", " << last_memory_snapshot;
   if (FLAGS_critic_snapshot.empty() && FLAGS_critic_weights.empty()) {
     FLAGS_critic_snapshot = last_critic_snapshot;
   }
@@ -216,7 +228,7 @@ int main(int argc, char** argv) {
   }
   std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
   if (!FLAGS_gui) { cmd += " --headless"; }
-  if (!FLAGS_evaluate) { cmd += " --no-logging"; }
+  // if (!FLAGS_evaluate) { cmd += " --no-logging"; }
   cmd += " &";
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
@@ -238,7 +250,7 @@ int main(int argc, char** argv) {
     critic_solver_param.set_max_iter(FLAGS_critic_max_iter);
   }
 
-  dqn::DQN dqn(actor_solver_param, critic_solver_param);
+  dqn::DQN dqn(actor_solver_param, critic_solver_param, save_path.native());
 
   // Load actor/critic/memory
   if (!FLAGS_actor_snapshot.empty()) {
@@ -261,7 +273,7 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_benchmark) {
-    PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true, -1);
+    PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true, 0);
     dqn.Benchmark(1000);
     return 0;
   }
@@ -269,7 +281,7 @@ int main(int argc, char** argv) {
   int last_eval_iter = 0;
   int last_snapshot_iter = 0;
   int episode = 0;
-  float warp_level = FLAGS_warp_action ? 1.0 : -1.0; // How much to warp actions by
+  float warp_level = FLAGS_warp_action ? 1.0 : 0; // How much to warp actions by
   double best_score = std::numeric_limits<double>::min();
   while (dqn.actor_iter() < actor_solver_param.max_iter() &&
          dqn.critic_iter() < critic_solver_param.max_iter()) {
@@ -284,7 +296,8 @@ int main(int argc, char** argv) {
                 << ", replay_mem_size = " << dqn.memory_size();
       if (FLAGS_warp_action) {
         LOG(INFO) << "Episode " << episode << ", warp_level = " << warp_level;
-        warp_level *= result.first > 0 ? 2.0 : 0.5; // Warp to 50% success rate
+        warp_level *= result.first > 0 ? 1.5 : 0.5;
+        warp_level = std::min(std::max(warp_level, 1.f), 100.f);
       }
       episode++;
     } else {
@@ -303,15 +316,7 @@ int main(int argc, char** argv) {
       }
       last_eval_iter = dqn.actor_iter();
     }
-    if (dqn.max_iter() >= last_snapshot_iter + FLAGS_snapshot_freq) {
-      dqn.Snapshot(save_path.native(), FLAGS_remove_old_snapshots, FLAGS_snapshot_memory);
-      last_snapshot_iter = dqn.max_iter();
-    }
   }
-  if (dqn.actor_iter() > last_eval_iter) {
-    Evaluate(hfo, dqn);
-  }
-  if (dqn.max_iter() > last_snapshot_iter) {
-    dqn.Snapshot(save_path.native(), FLAGS_remove_old_snapshots, FLAGS_snapshot_memory);
-  }
+  dqn.Snapshot();
+  Evaluate(hfo, dqn);
 };

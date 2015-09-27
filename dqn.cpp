@@ -26,8 +26,10 @@ DEFINE_int32(memory_threshold, 10000, "Number of transitions to start learning")
 DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_bool(update_actor, true, "Perform updates on actor.");
 DEFINE_bool(update_critic, true, "Perform updates on critic.");
-DEFINE_int32(critic_updates_per_actor_update, 1000, "Num updates to critic for each actor update.");
 DEFINE_double(q_diff, -1.0, "Diff at Critic's Q-Values layer.");
+DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
+DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
+DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -181,8 +183,17 @@ Action GetAction(const ActorOutput& actor_output) {
   return action;
 }
 
+std::string PrintActorOutput(const ActorOutput& actor_output) {
+  return "Dash(" + std::to_string(actor_output[4]) + ", " + std::to_string(actor_output[5]) + ")="
+      + std::to_string(actor_output[0]) + ", Turn(" + std::to_string(actor_output[6]) + ")="
+      + std::to_string(actor_output[1]) + ", Tackle(" + std::to_string(actor_output[7]) + ")="
+      + std::to_string(actor_output[2]) + ", Kick(" + std::to_string(actor_output[8])
+      + ", " + std::to_string(actor_output[9]) + ")=" + std::to_string(actor_output[3]);
+}
+
 DQN::DQN(caffe::SolverParameter& actor_solver_param,
-         caffe::SolverParameter& critic_solver_param) :
+         caffe::SolverParameter& critic_solver_param,
+         std::string save_path) :
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
@@ -190,7 +201,9 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         clone_frequency_(FLAGS_clone_freq),
         random_engine(),
         smoothed_critic_loss_(0),
-        smoothed_actor_loss_(0) {
+        smoothed_actor_loss_(0),
+        last_snapshot_iter_(0),
+        save_path_(save_path) {
   if (FLAGS_seed <= 0) {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     LOG(INFO) << "Seeding RNG to time (seed = " << seed << ")";
@@ -301,6 +314,10 @@ std::vector<std::string> FilesMatchingRegexp(const std::string& regexp) {
   return matching_files;
 }
 
+void DQN::Snapshot() {
+  Snapshot(save_path_, FLAGS_remove_old_snapshots, FLAGS_snapshot_memory);
+}
+
 void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
                    bool snapshot_memory) {
   using namespace boost::filesystem;
@@ -315,7 +332,7 @@ void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
   CHECK(is_regular_file(fname + ".caffemodel"));
   CHECK(is_regular_file(fname + ".solverstate"));
   if (snapshot_memory) {
-    fname = snapshot_prefix + "_iter_" + std::to_string(critic_iter);
+    fname = snapshot_prefix + "_iter_" + std::to_string(max_iter());
     std::string mem_fname = fname + ".replaymemory";
     LOG(INFO) << "Snapshotting memory to " << mem_fname;
     SnapshotReplayMemory(mem_fname);
@@ -328,6 +345,7 @@ void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
                     "\\.(caffemodel|solverstate)", critic_iter);
     RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter);
   }
+  LOG(INFO) << "Snapshotting Finished!";
 }
 
 void DQN::Initialize() {
@@ -542,17 +560,22 @@ void DQN::Update() {
     }
     smoothed_critic_loss_ += loss / float(FLAGS_loss_display_iter);
   }
-  if (FLAGS_update_actor) { // &&
-      // critic_iter() % FLAGS_critic_updates_per_actor_update == 0) {
+  if (FLAGS_update_actor) {
     float avg_q = UpdateActor();
     LOG(INFO) << "Actor Iteration " << actor_iter()
               << ", avg_q_value = " << avg_q;
-    // if (actor_iter() % FLAGS_loss_display_iter == 0) {
-    //   LOG(INFO) << "Actor Iteration " << actor_iter()
-    //             << ", diff = " << smoothed_actor_loss_;
-    //   smoothed_actor_loss_ = 0;
-    // }
-    // smoothed_actor_loss_ += diff / float(FLAGS_loss_display_iter);
+  }
+  bool critic_needs_snapshot = FLAGS_update_critic &&
+      critic_iter() >= last_snapshot_iter_ + FLAGS_snapshot_freq;
+  bool actor_needs_snapshot = FLAGS_update_actor &&
+      actor_iter() >= last_snapshot_iter_ + FLAGS_snapshot_freq;
+  if (critic_needs_snapshot || actor_needs_snapshot) {
+    Snapshot();
+    if (FLAGS_update_critic && FLAGS_update_actor) {
+      last_snapshot_iter_ = max_iter();
+    } else {
+      last_snapshot_iter_ = FLAGS_update_critic ? critic_iter() : actor_iter();
+    }
   }
 }
 
@@ -686,10 +709,23 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   // Prevent accumulation of actor gradients
   ZeroGradParameters(*actor_net_);
 
-  std::vector<InputStates> states_batch = SampleStatesFromMemory(kMinibatchSize);
-  std::vector<float> q_values = CriticForwardThroughActor(critic, states_batch);
-  // std::vector<ActorOutput> actor_output_batch = SelectActionGreedily(*actor_net_, states_batch);
-  // std::vector<float> q_values = CriticForward(critic, states_batch, actor_output_batch);
+  std::vector<int> transitions = SampleTransitionsFromMemory(kMinibatchSize);
+  std::vector<InputStates> states_batch(kMinibatchSize);
+  std::vector<ActorOutput> memory_actions(kMinibatchSize);
+  for (int i = 0; i < kMinibatchSize; ++i) {
+    const auto& transition = replay_memory_[transitions[i]];
+    InputStates last_states;
+    for (int j = 0; j < kStateInputCount; ++j) {
+      last_states[j] = std::get<0>(transition)[j];
+    }
+    states_batch[i] = last_states;
+    memory_actions[i] = std::get<1>(transition);
+  }
+
+  // std::vector<InputStates> states_batch = SampleStatesFromMemory(kMinibatchSize);
+  // std::vector<float> q_values = CriticForwardThroughActor(critic, states_batch);
+  std::vector<ActorOutput> actor_output_batch = SelectActionGreedily(*actor_net_, states_batch);
+  std::vector<float> q_values = CriticForward(critic, states_batch, actor_output_batch);
 
   // Set the critic diff and run backward
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
@@ -702,13 +738,13 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   // float ap_diff = critic_action_params_blob->asum_diff() / critic_action_params_blob->count();
 
   // Option 1: Transfer input-level diffs from Critic to Actor
-  actor_actions_blob->ShareDiff(*critic_actions_blob);
-  actor_action_params_blob->ShareDiff(*critic_action_params_blob);
-  DLOG(INFO) << " [Backwards] " << actor_net_->name();
-  actor_net_->Backward();
-  actor_solver_->ComputeUpdateValue();
-  actor_solver_->set_iter(actor_solver_->iter() + 1);
-  actor_net_->Update();
+  // actor_actions_blob->ShareDiff(*critic_actions_blob);
+  // actor_action_params_blob->ShareDiff(*critic_action_params_blob);
+  // DLOG(INFO) << " [Backwards] " << actor_net_->name();
+  // actor_net_->Backward();
+  // actor_solver_->ComputeUpdateValue();
+  // actor_solver_->set_iter(actor_solver_->iter() + 1);
+  // actor_net_->Update();
 
   // Option 2: Converts Critic Diff --> Softmax Label
   // Find the index of the action the critic most wants to take
@@ -749,20 +785,70 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   //     actor_action_param_diff[actor_action_params_blob->offset(n,p2,0,0)] =
   //         critic_action_params_blob->diff_at(n,0,p2,0);
   //   }
-  //   // for (int a = 0; a < kActionSize; ++a) {
-  //   //   actor_action_diff[actor_actions_blob->offset(n,a,0,0)] =
-  //   //       critic_actions_blob->diff_at(n,0,a,0);
-  //   // }
-  //   // for (int p = 0; p < kActionParamSize; ++p) {
-  //   //   actor_action_param_diff[actor_action_params_blob->offset(n,p,0,0)] =
-  //   //       critic_action_params_blob->diff_at(n,0,p,0);
-  //   // }
   // }
   // DLOG(INFO) << " [Backwards] " << actor_net_->name();
   // actor_net_->Backward();
   // actor_solver_->ComputeUpdateValue();
   // actor_solver_->set_iter(actor_solver_->iter() + 1);
   // actor_net_->Update();
+
+  // Option 4: Only set the diff for the dash speed parameter
+  // float* actor_action_diff = actor_actions_blob->mutable_cpu_diff();
+  // float* actor_action_param_diff = actor_action_params_blob->mutable_cpu_diff();
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   Action a = GetAction(actor_output_batch[n]);
+  //   if (a.action == DASH) {
+  //     actor_action_param_diff[actor_action_params_blob->offset(n,0,0,0)] =
+  //         critic_action_params_blob->diff_at(n,0,0,0);
+  //   }
+  // }
+  // DLOG(INFO) << " [Backwards] " << actor_net_->name();
+  // actor_net_->Backward();
+  // actor_solver_->ComputeUpdateValue();
+  // actor_solver_->set_iter(actor_solver_->iter() + 1);
+  // actor_net_->Update();
+
+  // Option 5: Balance updates from critc with updates from memory
+  // float* actor_action_diff = actor_actions_blob->mutable_cpu_diff();
+  // float* actor_action_param_diff = actor_action_params_blob->mutable_cpu_diff();
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   for (int i = 0; i < kActionSize; ++i) {
+  //     actor_action_diff[actor_actions_blob->offset(n,i,0,0)] =
+  //         -.1 * (memory_actions[n][i] - actor_output_batch[n][i]);
+  //   }
+  //   Action a = GetAction(actor_output_batch[n]);
+  //   if (a.action == DASH) {
+  //     // Set the diff for all params
+  //     // actor_action_params_blob->ShareDiff(*critic_action_params_blob);
+  //     // Set the dash action diff here according to the critic
+  //     actor_action_param_diff[actor_action_params_blob->offset(n,0,0,0)] =
+  //         critic_action_params_blob->diff_at(n,0,0,0);
+
+  //     // Manually set diff here
+  //     // actor_action_param_diff[actor_action_params_blob->offset(n,0,0,0)] = -.1 * (100.0 - a.arg1);
+
+  //     for (int i = 1; i < kActionParamSize; ++i) {
+  //       actor_action_param_diff[actor_action_params_blob->offset(n,i,0,0)] =
+  //           -.1 * (memory_actions[n][kActionSize+i] - actor_output_batch[n][kActionSize+i]);
+  //     }
+  //   }
+  //   else {
+  //     for (int i = 0; i < kActionParamSize; ++i) {
+  //       actor_action_param_diff[actor_action_params_blob->offset(n,i,0,0)] =
+  //           -.1 * (memory_actions[n][kActionSize+i] - actor_output_batch[n][kActionSize+i]);
+  //     }
+  //   }
+  // }
+  // DLOG(INFO) << " [Backwards] " << actor_net_->name();
+  // actor_net_->Backward();
+  // actor_solver_->ComputeUpdateValue();
+  // actor_solver_->set_iter(actor_solver_->iter() + 1);
+  // actor_net_->Update();
+
+  std::vector<ActorOutput> new_actor_output_batch = SelectActionGreedily(*actor_net_, states_batch);
+  LOG(INFO) << "Original: " << PrintActorOutput(actor_output_batch[0]);
+  LOG(INFO) << "Memory:   " << PrintActorOutput(memory_actions[0]);
+  LOG(INFO) << "New:      " << PrintActorOutput(new_actor_output_batch[0]);
 
   // std::vector<float> new_q_values = CriticForwardThroughActor(critic, states_batch);
   // float avg_q = 0, post_avg_q = 0, avg_q_diff = 0;

@@ -56,7 +56,8 @@ constexpr auto loss_blob_name          = "loss";
 class DQN {
 public:
   DQN(caffe::SolverParameter& actor_solver_param,
-      caffe::SolverParameter& critic_solver_param);
+      caffe::SolverParameter& critic_solver_param,
+      std::string save_path);
 
   // Benchmark the speed of updates
   void Benchmark(int iterations=1000);
@@ -71,6 +72,7 @@ public:
   // Snapshot the model/solver/replay memory. Produces files:
   // snapshot_prefix_iter_N.[caffemodel|solverstate|replaymem]. Optionally
   // removes snapshots with same prefix but lower iteration.
+  void Snapshot();
   void Snapshot(const std::string& snapshot_prefix, bool remove_old=false,
                 bool snapshot_memory=true);
 
@@ -118,6 +120,7 @@ public:
   int memory_size() const { return replay_memory_.size(); }
 
   // Return the current iteration of the solvers
+  int min_iter() const { return std::min(actor_iter(), critic_iter()); }
   int max_iter() const { return std::max(actor_iter(), critic_iter()); }
   int critic_iter() const { return critic_solver_->iter(); }
   int actor_iter() const { return actor_solver_->iter(); }
@@ -182,6 +185,8 @@ protected:
   NetSp critic_target_net_; // Clone of critic net. Used to generate targets.
   std::mt19937 random_engine;
   float smoothed_critic_loss_, smoothed_actor_loss_;
+  int last_snapshot_iter_;
+  std::string save_path_;
 };
 
 /**
@@ -215,6 +220,8 @@ void FindLatestSnapshot(const std::string& snapshot_prefix,
  * Look for the best HiScore matching the given snapshot prefix
  */
 int FindHiScore(const std::string& snapshot_prefix);
+
+std::string PrintActorOutput(const ActorOutput& actor_output);
 
 } // namespace dqn
 
