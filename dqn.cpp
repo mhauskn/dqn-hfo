@@ -321,8 +321,8 @@ void DQN::Snapshot() {
 void DQN::Snapshot(const std::string& snapshot_prefix, bool remove_old,
                    bool snapshot_memory) {
   using namespace boost::filesystem;
-  actor_solver_->Snapshot(snapshot_prefix + "_actor");
-  critic_solver_->Snapshot(snapshot_prefix + "_critic");
+  actor_solver_->SnapshotFilename(snapshot_prefix + "_actor");
+  critic_solver_->SnapshotFilename(snapshot_prefix + "_critic");
   int actor_iter = actor_solver_->iter() + 1;
   std::string fname = snapshot_prefix + "_actor_iter_" + std::to_string(actor_iter);
   CHECK(is_regular_file(fname + ".caffemodel"));
