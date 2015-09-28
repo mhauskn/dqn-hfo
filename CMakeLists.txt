@@ -35,3 +35,6 @@ target_link_libraries(dqn ${HFO_LIBRARIES})
 if(CPU_ONLY)
   add_definitions(-DCPU_ONLY)
 endif()
+
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+  COMMAND ln -sf ${HFO_ROOT_DIR}/bin/HFO ${CMAKE_CURRENT_SOURCE_DIR}/scripts)

@@ -143,6 +143,9 @@ protected:
 
   // Clone the network and store the result in clone_net_
   void CloneNet(NetSp& net_from, NetSp& net_to);
+  // Update the parameters of net_to towards net_from.
+  // net_to = tau * net_from + (1 - tau) * net_to
+  void SoftUpdateNet(NetSp& net_from, NetSp& net_to, float tau);
 
   // Given input states, use the actor network to select an action.
   ActorOutput SelectActionGreedily(caffe::Net<float>& actor,
@@ -176,13 +179,13 @@ protected:
   caffe::SolverParameter critic_solver_param_;
   const int replay_memory_capacity_;
   const double gamma_;
-  const int clone_frequency_; // How often (steps) the clone_net is updated
   std::deque<Transition> replay_memory_;
   SolverSp actor_solver_;
   NetSp actor_net_; // The actor network used for continuous action evaluation.
   SolverSp critic_solver_;
   NetSp critic_net_;  // The critic network used for giving q-value of a continuous action;
   NetSp critic_target_net_; // Clone of critic net. Used to generate targets.
+  NetSp actor_target_net_; // Clone of the actor net. Used to generate targets.
   std::mt19937 random_engine;
   float smoothed_critic_loss_, smoothed_actor_loss_;
   int last_snapshot_iter_;

@@ -19,7 +19,7 @@ using namespace hfo;
 
 // DQN Args
 DEFINE_int32(seed, 0, "Seed the RNG. Default: time");
-DEFINE_int32(clone_freq, 10000, "Frequency (steps) of cloning the target network.");
+DEFINE_double(tau, .001, "Step size for soft updates.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(memory, 500000, "Capacity of replay memory");
 DEFINE_int32(memory_threshold, 10000, "Number of transitions to start learning");
@@ -198,7 +198,6 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
         gamma_(FLAGS_gamma),
-        clone_frequency_(FLAGS_clone_freq),
         random_engine(),
         smoothed_critic_loss_(0),
         smoothed_actor_loss_(0),
@@ -266,6 +265,7 @@ void DQN::LoadActorWeights(const std::string& actor_weights) {
       << "Invalid file: " << actor_weights;
   LOG(INFO) << "Actor weights finetuning from " << actor_weights;
   actor_net_->CopyTrainedLayersFrom(actor_weights);
+  CloneNet(actor_net_, actor_target_net_);
 }
 
 void DQN::LoadCriticWeights(const std::string& critic_weights) {
@@ -281,6 +281,7 @@ void DQN::RestoreActorSolver(const std::string& actor_solver) {
       << "Invalid file: " << actor_solver;
   LOG(INFO) << "Actor solver state resuming from " << actor_solver;
   actor_solver_->Restore(actor_solver.c_str());
+  CloneNet(actor_net_, actor_target_net_);
 }
 
 void DQN::RestoreCriticSolver(const std::string& critic_solver) {
@@ -387,6 +388,7 @@ void DQN::Initialize() {
   CHECK(critic_net_->has_layer(target_input_layer_name));
   CHECK(critic_net_->has_layer(q_values_layer_name));
   CloneNet(critic_net_, critic_target_net_);
+  CloneNet(actor_net_, actor_target_net_);
 }
 
 Action DQN::GetRandomHFOAction() {
@@ -630,11 +632,6 @@ float DQN::UpdateCritic() {
   const auto action_params_blob = critic_net_->blob_by_name(action_params_blob_name);
   const auto target_blob = critic_net_->blob_by_name(targets_blob_name);
   const auto loss_blob = critic_net_->blob_by_name(loss_blob_name);
-  // Every clone_iters steps, update the clone_net_ to equal the primary net
-  if (critic_iter() % clone_frequency_ == 0) {
-    LOG(INFO) << "Critic Iter " << critic_iter() << ": Updating Clone Net";
-    CloneNet(critic_net_, critic_target_net_);
-  }
   // Collect a batch of next-states used to generate target_q_values
   std::vector<int> transitions = SampleTransitionsFromMemory(kMinibatchSize);
   std::vector<InputStates> target_states_batch;
@@ -684,6 +681,7 @@ float DQN::UpdateCritic() {
   // Return the loss
   float loss = loss_blob->data_at(0,0,0,0);
   CHECK(std::isfinite(loss)) << "Critic loss not finite!";
+  SoftUpdateNet(critic_net_, critic_target_net_, FLAGS_tau);
   return loss;
 }
 
@@ -738,13 +736,12 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   // float ap_diff = critic_action_params_blob->asum_diff() / critic_action_params_blob->count();
 
   // Option 1: Transfer input-level diffs from Critic to Actor
-  // actor_actions_blob->ShareDiff(*critic_actions_blob);
-  // actor_action_params_blob->ShareDiff(*critic_action_params_blob);
-  // DLOG(INFO) << " [Backwards] " << actor_net_->name();
-  // actor_net_->Backward();
-  // actor_solver_->ComputeUpdateValue();
-  // actor_solver_->set_iter(actor_solver_->iter() + 1);
-  // actor_net_->Update();
+  actor_actions_blob->ShareDiff(*critic_actions_blob);
+  actor_action_params_blob->ShareDiff(*critic_action_params_blob);
+  DLOG(INFO) << " [Backwards] " << actor_net_->name();
+  actor_net_->Backward();
+  actor_solver_->ApplyUpdate();
+  actor_solver_->set_iter(actor_solver_->iter() + 1);
 
   // Option 2: Converts Critic Diff --> Softmax Label
   // Find the index of the action the critic most wants to take
@@ -845,10 +842,10 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   // actor_solver_->set_iter(actor_solver_->iter() + 1);
   // actor_net_->Update();
 
-  std::vector<ActorOutput> new_actor_output_batch = SelectActionGreedily(*actor_net_, states_batch);
-  LOG(INFO) << "Original: " << PrintActorOutput(actor_output_batch[0]);
-  LOG(INFO) << "Memory:   " << PrintActorOutput(memory_actions[0]);
-  LOG(INFO) << "New:      " << PrintActorOutput(new_actor_output_batch[0]);
+  // std::vector<ActorOutput> new_actor_output_batch = SelectActionGreedily(*actor_net_, states_batch);
+  // LOG(INFO) << "Original: " << PrintActorOutput(actor_output_batch[0]);
+  // LOG(INFO) << "Memory:   " << PrintActorOutput(memory_actions[0]);
+  // LOG(INFO) << "New:      " << PrintActorOutput(new_actor_output_batch[0]);
 
   // std::vector<float> new_q_values = CriticForwardThroughActor(critic, states_batch);
   // float avg_q = 0, post_avg_q = 0, avg_q_diff = 0;
@@ -863,6 +860,7 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
   //         << ", PostUpdateAvgQ = " << post_avg_q
   //         << ", AvgQDiff = " << avg_q_diff;
 
+  SoftUpdateNet(actor_net_, actor_target_net_, FLAGS_tau);
   return std::accumulate(q_values.begin(), q_values.end(), 0.0) / float(q_values.size());
 }
 
@@ -925,6 +923,18 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
     net_to.reset(new caffe::Net<float>(net_param));
   } else {
     net_to->CopyTrainedLayersFrom(net_param);
+  }
+}
+
+void DQN::SoftUpdateNet(NetSp& net_from, NetSp& net_to, float tau) {
+  const auto& from_params = net_from->params();
+  const auto& to_params = net_to->params();
+  CHECK_EQ(from_params.size(), to_params.size());
+  for (int i = 0; i < from_params.size(); ++i) {
+    auto& from_blob = from_params[i];
+    auto& to_blob = to_params[i];
+    caffe::caffe_cpu_axpby(from_blob->count(), tau, from_blob->cpu_data(),
+                           (1-tau), to_blob->mutable_cpu_data());
   }
 }
 
