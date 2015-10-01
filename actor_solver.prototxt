@@ -1,9 +1,10 @@
 net: "actor.prototxt"
-solver_type: ADADELTA
+solver_type: ADAM
 momentum: 0.95
-base_lr: 0.1
+base_lr: 0.001
 lr_policy: "step"
 gamma: 0.1
 stepsize: 10000000
 max_iter: 10000000
 display: 0
+clip_gradients: 10

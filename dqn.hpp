@@ -129,6 +129,8 @@ protected:
   // Initialize DQN. Called by the constructor
   void Initialize();
 
+  // Update both the actor and critic.
+  std::pair<float, float> UpdateActorCritic();
   // Update DQN using one minibatch. Returns the loss.
   float UpdateCritic();
   // Updates the actor against the critic_net_. Returns diff from critic.
@@ -158,7 +160,8 @@ protected:
 
   // Runs forward on critic to produce q-values. Actions inferred by actor.
   std::vector<float> CriticForwardThroughActor(
-      caffe::Net<float>& critic, const std::vector<InputStates>& states_batch);
+      caffe::Net<float>& critic, caffe::Net<float>& actor,
+      const std::vector<InputStates>& states_batch);
 
   // Runs forward on critic to produce q-values.
   std::vector<float> CriticForward(caffe::Net<float>& critic,

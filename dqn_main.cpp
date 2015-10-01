@@ -32,7 +32,7 @@ DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory)."
 DEFINE_int32(actor_max_iter, 0, "Custom max iter of the actor.");
 DEFINE_int32(critic_max_iter, 0, "Custom max iter of the critic.");
 // Epsilon-Greedy Args
-DEFINE_int32(explore, 1000000, "Iterations for epsilon to reach given value.");
+DEFINE_int32(explore, 100000, "Iterations for epsilon to reach given value.");
 DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 // Evaluation Args
@@ -40,7 +40,7 @@ DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates")
 DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 // HFO Args
-DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --fullstate --seed 123",
+DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --fullstate --frames-per-trial 100",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
@@ -55,25 +55,89 @@ double CalculateEpsilon(const int iter) {
   }
 }
 
+class HFOGameState {
+ public:
+  HFOEnvironment& hfo;
+  float old_ball_prox, ball_prox_delta;
+  float old_kickable, kickable_delta;
+  int steps;
+  double total_reward;
+  status_t status;
+  bool episode_over;
+  HFOGameState(HFOEnvironment& hfo) :
+      hfo(hfo), old_ball_prox(0), ball_prox_delta(0), old_kickable(0),
+      kickable_delta(0), steps(0), total_reward(0), status(IN_GAME),
+      episode_over(false) {
+    VLOG(1) << "Creating new HFOGameState";
+  }
+  ~HFOGameState() {
+    VLOG(1) << "Destroying HFOGameState";
+    while (status == IN_GAME) {
+      status = hfo.act({DASH, 0, 0});
+    }
+  }
+  void update(const std::vector<float>& current_state, status_t current_status) {
+    status = current_status;
+    if (status != IN_GAME) {
+      episode_over = true;
+    }
+    float ball_proximity = current_state[53];
+    float kickable = current_state[12];
+    VLOG(1) << "BallProximity: " << ball_proximity << " Kickable: " << kickable
+            << " BallPosValid: " << current_state[54];
+    if (steps > 0) {
+      ball_prox_delta = ball_proximity - old_ball_prox;
+      kickable_delta = kickable - old_kickable;
+    }
+    old_ball_prox = ball_proximity;
+    old_kickable = kickable;
+    if (episode_over) {
+      ball_prox_delta = 0;
+      kickable_delta = 0;
+    }
+    steps++;
+  }
+  float reward() {
+    float reward = move_to_ball_reward();
+    // End the episode once the agent can kick the ball
+    if (kickable_delta >= 1) {
+      reward += 1.0;
+      episode_over = true;
+    }
+    total_reward += reward;
+    VLOG(1) << "Reward: " << reward;
+    return reward;
+  }
+  float move_to_ball_reward() {
+    return ball_prox_delta;
+  }
+  float EOT_reward() {
+    if (status == GOAL) {
+      VLOG(1) << "GOAL"; return 1;
+    } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
+               status == OUT_OF_TIME) {
+      VLOG(1) << "FAIL"; return -1;
+    }
+  }
+};
+
 /**
  * Play one episode and return the total score and number of steps
  */
 std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
                                       const double epsilon,
                                       const bool update, float warp_level) {
+  HFOGameState game(hfo);
   hfo.act({DASH, 0, 0});
   std::deque<dqn::StateDataSp> past_states;
-  double total_score = 0;
-  int steps = 0;
-  status_t status = IN_GAME;
-  while (status == IN_GAME) {
+  while (!game.episode_over) {
     const std::vector<float>& current_state = hfo.getState();
     CHECK_EQ(current_state.size(), dqn::kStateSize);
     dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kStateInputCount) {
-      status = hfo.act({DASH, 0, 0});
+      hfo.act({DASH, 0, 0});
     } else {
       while (past_states.size() > dqn::kStateInputCount) {
         past_states.pop_front();
@@ -93,22 +157,15 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
         actor_output = warped_output;
         action = warped_action;
       }
-      status = hfo.act(action);
-      float reward = 0;
-      if (status == GOAL) {
-        reward = 1; VLOG(1) << "GOAL";
-      } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
-                 status == OUT_OF_TIME) {
-        reward = -1; VLOG(1) << "FAIL";
-      }
-      total_score += reward;
-      steps++;
+      status_t status = hfo.act(action);
+      game.update(current_state, status);
+      float reward = game.reward();
       if (update) {
         const std::vector<float>& next_state = hfo.getState();
         CHECK_EQ(next_state.size(), dqn::kStateSize);
         dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
-        const auto transition = (status == IN_GAME) ?
+        const auto transition = (game.status == IN_GAME) ?
             dqn::Transition(input_states, actor_output, reward, next_state_sp):
             dqn::Transition(input_states, actor_output, reward, boost::none);
         dqn.AddTransition(transition);
@@ -116,7 +173,7 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
       }
     }
   }
-  return std::make_pair(total_score, steps);
+  return std::make_pair(game.total_reward, game.steps);
 }
 
 template <class T>
@@ -155,7 +212,9 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   std::pair<double, double> score_dist = get_avg_std(scores);
   std::pair<double, double> steps_dist = get_avg_std(steps);
   std::pair<double, double> succ_steps_dist = get_avg_std(successful_trial_steps);
-  LOG(INFO) << "Evaluation avg_score = " << score_dist.first
+  LOG(INFO) << "Evaluation: "
+            << " actor_iter = " << dqn.actor_iter()
+            << ", avg_score = " << score_dist.first
             << ", score_std = " << score_dist.second
             << ", avg_steps = " << steps_dist.first
             << ", steps_std = " << steps_dist.second
@@ -228,7 +287,7 @@ int main(int argc, char** argv) {
   }
   std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
   if (!FLAGS_gui) { cmd += " --headless"; }
-  // if (!FLAGS_evaluate) { cmd += " --no-logging"; }
+  if (!FLAGS_evaluate) { cmd += " --no-logging"; }
   cmd += " &";
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
@@ -310,8 +369,7 @@ int main(int argc, char** argv) {
                   << ", actor_iter = " << dqn.actor_iter()
                   << ", critic_iter = " << dqn.critic_iter();
         best_score = avg_score;
-        std::string fname = save_path.native() + "_HiScore" +
-            std::to_string(avg_score);
+        std::string fname = save_path.native() + "_HiScore" + std::to_string(avg_score);
         dqn.Snapshot(fname, false, false);
       }
       last_eval_iter = dqn.actor_iter();

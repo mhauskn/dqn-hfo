@@ -132,15 +132,15 @@ layer {
     }
   }
 }
-layer {
-  name: "softmax_action_layer"
-  type: "Softmax"
-  bottom: "actions"
-  top: "actions"
-  softmax_param {
-    axis: 1
-  }
-}
+# layer {
+#   name: "softmax_action_layer"
+#   type: "Softmax"
+#   bottom: "actions"
+#   top: "actions"
+#   softmax_param {
+#     axis: 1
+#   }
+# }
 # layer {
 #   name: "multinomial_logistic_loss_layer"
 #   type: "MultinomialLogisticLoss"
