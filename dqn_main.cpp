@@ -60,13 +60,15 @@ class HFOGameState {
   HFOEnvironment& hfo;
   float old_ball_prox, ball_prox_delta;
   float old_kickable, kickable_delta;
+  float old_ball_dist_goal, ball_dist_goal_delta;
   int steps;
   double total_reward;
   status_t status;
   bool episode_over;
   HFOGameState(HFOEnvironment& hfo) :
       hfo(hfo), old_ball_prox(0), ball_prox_delta(0), old_kickable(0),
-      kickable_delta(0), steps(0), total_reward(0), status(IN_GAME),
+      kickable_delta(0), old_ball_dist_goal(0), ball_dist_goal_delta(0),
+      steps(0), total_reward(0), status(IN_GAME),
       episode_over(false) {
     VLOG(1) << "Creating new HFOGameState";
   }
@@ -82,15 +84,31 @@ class HFOGameState {
       episode_over = true;
     }
     float ball_proximity = current_state[53];
+    float goal_proximity = current_state[15];
+    float ball_dist = 1.0 - ball_proximity;
+    float goal_dist = 1.0 - goal_proximity;
     float kickable = current_state[12];
-    VLOG(1) << "BallProximity: " << ball_proximity << " Kickable: " << kickable
-            << " BallPosValid: " << current_state[54];
+    float ball_ang_sin_rad = current_state[51];
+    float ball_ang_cos_rad = current_state[52];
+    float ball_ang_rad = acos(ball_ang_cos_rad);
+    if (ball_ang_sin_rad < 0) { ball_ang_rad *= -1.; }
+    float goal_ang_sin_rad = current_state[13];
+    float goal_ang_cos_rad = current_state[14];
+    float goal_ang_rad = acos(goal_ang_cos_rad);
+    if (goal_ang_sin_rad < 0) { goal_ang_rad *= -1.; }
+    float alpha = std::max(ball_ang_rad, goal_ang_rad) - std::min(ball_ang_rad, goal_ang_rad);
+    // By law of cosines. Alpha is angle between ball and goal
+    float ball_dist_goal = sqrt(ball_dist*ball_dist + goal_dist*goal_dist -
+                                2.*ball_dist*goal_dist*cos(alpha));
+    VLOG(1) << "BallProx: " << ball_proximity << " BallDistGoal: " << ball_dist_goal;
     if (steps > 0) {
       ball_prox_delta = ball_proximity - old_ball_prox;
       kickable_delta = kickable - old_kickable;
+      ball_dist_goal_delta = ball_dist_goal - old_ball_dist_goal;
     }
     old_ball_prox = ball_proximity;
     old_kickable = kickable;
+    old_ball_dist_goal = ball_dist_goal;
     if (episode_over) {
       ball_prox_delta = 0;
       kickable_delta = 0;
@@ -98,18 +116,24 @@ class HFOGameState {
     steps++;
   }
   float reward() {
-    float reward = move_to_ball_reward();
-    // End the episode once the agent can kick the ball
-    if (kickable_delta >= 1) {
-      reward += 1.0;
-      episode_over = true;
-    }
+    float reward = move_to_ball_reward(); // kick_to_goal_reward();
     total_reward += reward;
     VLOG(1) << "Reward: " << reward;
     return reward;
   }
+  // Reward for moving to ball and getting kickable. Ends episode once
+  // kickable is attained.
   float move_to_ball_reward() {
-    return ball_prox_delta;
+    float reward = ball_prox_delta;
+    if (kickable_delta >= 1) {
+      reward += 1.0;
+      episode_over = true;
+    }
+    return reward;
+  }
+  // Reward for kicking ball towards the goal
+  float kick_to_goal_reward() {
+    return -ball_dist_goal_delta;
   }
   float EOT_reward() {
     if (status == GOAL) {
