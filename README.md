@@ -4,9 +4,10 @@ This is an continuous action deep reinforcement learning agent for the
 RoboCup 2D domain. The domain can be found and downloaded from
 https://github.com/mhauskn/HFO.
 
-This repo is designed to work with the latest version of Caffe
-(currently commit ff16f6e43dd718921e5203f640dd57c68f01cdb3) with the
-following minor changes:
+This repo is designed to work with the latest version of
+[Caffe](https://github.com/BVLC/caffe) (currently commit
+ff16f6e43dd718921e5203f640dd57c68f01cdb3) with the following minor
+changes:
 
 ```
 --- a/include/caffe/solver.hpp
