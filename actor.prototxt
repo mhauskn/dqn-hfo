@@ -37,7 +37,7 @@ layer {
   bottom: "states"
   top: "ip1"
   inner_product_param {
-    num_output: 1000
+    num_output: 1024
     weight_filler {
       type: "gaussian"
       std: 0.01
@@ -81,7 +81,7 @@ layer {
   bottom: "ip2"
   top: "ip3"
   inner_product_param {
-    num_output: 200
+    num_output: 256
     weight_filler {
       type: "gaussian"
       std: 0.01
@@ -103,7 +103,7 @@ layer {
   bottom: "ip3"
   top: "ip4"
   inner_product_param {
-    num_output: 64
+    num_output: 128
     weight_filler {
       type: "gaussian"
       std: 0.01

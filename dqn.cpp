@@ -364,10 +364,10 @@ void DQN::Snapshot(const std::string& snapshot_prefix,
   }
   if (remove_old) {
     RemoveSnapshots(snapshot_prefix + "_actor_iter_[0-9]+"
-                    "\\.(caffemodel|solverstate)", actor_iter);
+                    "\\.(caffemodel|solverstate)", actor_iter - 1);
     RemoveSnapshots(snapshot_prefix + "_critic_iter_[0-9]+"
-                    "\\.(caffemodel|solverstate)", critic_iter);
-    RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter);
+                    "\\.(caffemodel|solverstate)", critic_iter - 1);
+    RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter - 1);
   }
   LOG(INFO) << "Snapshotting Finished!";
 }

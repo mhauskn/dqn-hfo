@@ -40,7 +40,7 @@ DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates")
 DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 // HFO Args
-DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --fullstate --frames-per-trial 100",
+DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --fullstate --frames-per-trial 500",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
@@ -65,11 +65,12 @@ class HFOGameState {
   double total_reward;
   status_t status;
   bool episode_over;
+  bool got_kickable_reward;
   HFOGameState(HFOEnvironment& hfo) :
       hfo(hfo), old_ball_prox(0), ball_prox_delta(0), old_kickable(0),
       kickable_delta(0), old_ball_dist_goal(0), ball_dist_goal_delta(0),
       steps(0), total_reward(0), status(IN_GAME),
-      episode_over(false) {
+      episode_over(false), got_kickable_reward(false) {
     VLOG(1) << "Creating new HFOGameState";
   }
   ~HFOGameState() {
@@ -112,22 +113,28 @@ class HFOGameState {
     if (episode_over) {
       ball_prox_delta = 0;
       kickable_delta = 0;
+      ball_dist_goal_delta = 0;
     }
     steps++;
   }
   float reward() {
-    float reward = move_to_ball_reward(); // kick_to_goal_reward();
+    float moveToBallReward = move_to_ball_reward();
+    float kickToGoalReward = 5. * kick_to_goal_reward();
+    float eotReward = 5. * EOT_reward();
+    float reward = moveToBallReward + kickToGoalReward + eotReward;
     total_reward += reward;
-    VLOG(1) << "Reward: " << reward;
+    VLOG(1) << "Overall_Reward: " << reward << " MTB: " << moveToBallReward
+            << " KTG: " << kickToGoalReward << " EOT: " << eotReward;
     return reward;
   }
   // Reward for moving to ball and getting kickable. Ends episode once
   // kickable is attained.
   float move_to_ball_reward() {
     float reward = ball_prox_delta;
-    if (kickable_delta >= 1) {
+    if (kickable_delta >= 1 && !got_kickable_reward) {
       reward += 1.0;
-      episode_over = true;
+      // episode_over = true;
+      got_kickable_reward = true;
     }
     return reward;
   }
@@ -138,10 +145,12 @@ class HFOGameState {
   float EOT_reward() {
     if (status == GOAL) {
       VLOG(1) << "GOAL"; return 1;
-    } else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
-               status == OUT_OF_TIME) {
-      VLOG(1) << "FAIL"; return -1;
     }
+    // else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
+    //            status == OUT_OF_TIME) {
+    //   VLOG(1) << "FAIL"; return -1;
+    // }
+    return 0;
   }
 };
 
