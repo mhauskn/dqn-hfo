@@ -119,7 +119,7 @@ class HFOGameState {
   }
   float reward() {
     float moveToBallReward = move_to_ball_reward();
-    float kickToGoalReward = 5. * kick_to_goal_reward();
+    float kickToGoalReward = 3. * kick_to_goal_reward();
     float eotReward = 5. * EOT_reward();
     float reward = moveToBallReward + kickToGoalReward + eotReward;
     total_reward += reward;
