@@ -76,7 +76,7 @@ class HFOGameState {
   ~HFOGameState() {
     VLOG(1) << "Destroying HFOGameState";
     while (status == IN_GAME) {
-      status = hfo.act({DASH, 0, 0});
+      status = hfo.act(DASH, 0, 0);
     }
   }
   void update(const std::vector<float>& current_state, status_t current_status) {
@@ -161,7 +161,7 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
                                       const double epsilon,
                                       const bool update, float warp_level) {
   HFOGameState game(hfo);
-  hfo.act({DASH, 0, 0});
+  hfo.act(DASH, 0, 0);
   std::deque<dqn::StateDataSp> past_states;
   while (!game.episode_over) {
     const std::vector<float>& current_state = hfo.getState();
@@ -170,7 +170,7 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kStateInputCount) {
-      hfo.act({DASH, 0, 0});
+      hfo.act(DASH, 0, 0);
     } else {
       while (past_states.size() > dqn::kStateInputCount) {
         past_states.pop_front();
@@ -190,7 +190,7 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
         actor_output = warped_output;
         action = warped_action;
       }
-      status_t status = hfo.act(action);
+      status_t status = hfo.act(action.action, action.arg1, action.arg2);
       game.update(current_state, status);
       float reward = game.reward();
       if (update) {
