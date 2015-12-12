@@ -76,7 +76,8 @@ class HFOGameState {
   ~HFOGameState() {
     VLOG(1) << "Destroying HFOGameState";
     while (status == IN_GAME) {
-      status = hfo.act(DASH, 0, 0);
+      hfo.act(DASH, 0, 0);
+      status = hfo.step();
     }
   }
   void update(const std::vector<float>& current_state, status_t current_status) {
@@ -190,7 +191,8 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
         actor_output = warped_output;
         action = warped_action;
       }
-      status_t status = hfo.act(action.action, action.arg1, action.arg2);
+      hfo.act(action.action, action.arg1, action.arg2);
+      status_t status = hfo.step();
       game.update(current_state, status);
       float reward = game.reward();
       if (update) {
