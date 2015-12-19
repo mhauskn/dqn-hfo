@@ -17,7 +17,7 @@ constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kActionSize = 4;
 constexpr auto kActionParamSize = 6;
-constexpr auto kStateSize = 58;
+constexpr auto kStateSize = 66;
 
 constexpr auto kStateInputDataSize = kMinibatchSize * kStateSize * kStateInputCount;
 constexpr auto kActionInputDataSize = kMinibatchSize * kActionSize;
