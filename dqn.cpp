@@ -30,6 +30,8 @@ DEFINE_double(q_diff, -1.0, "Diff at Critic's Q-Values layer.");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
+DEFINE_bool(advantage_update, false, "Use advantage learning.");
+DEFINE_double(alpha, .6, "Advantage learning gain");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -200,9 +202,147 @@ std::string PrintActorOutput(const float* actions, const float* params) {
       + ", " + std::to_string(params[5]) + ")=" + std::to_string(actions[3]);
 }
 
+void PopulateLayer(caffe::LayerParameter& layer,
+                   const std::string& name, const std::string& type,
+                   const std::vector<std::string>& bottoms,
+                   const std::vector<std::string>& tops,
+                   const boost::optional<caffe::Phase>& include_phase) {
+  layer.set_name(name);
+  layer.set_type(type);
+  for (auto& bottom : bottoms) {
+    layer.add_bottom(bottom);
+  }
+  for (auto& top : tops) {
+    layer.add_top(top);
+  }
+  // PopulateLayer(layer, name, type, bottoms, tops);
+  if (include_phase) {
+    layer.add_include()->set_phase(*include_phase);
+  }
+}
+void MemoryDataLayer(caffe::NetParameter& net_param,
+                     const std::string& name,
+                     const std::vector<std::string>& tops,
+                     const boost::optional<caffe::Phase>& include_phase,
+                     const std::vector<int>& shape) {
+  caffe::LayerParameter& memory_layer = *net_param.add_layer();
+  PopulateLayer(memory_layer, name, "MemoryData", {}, tops, include_phase);
+  CHECK_EQ(shape.size(), 4);
+  caffe::MemoryDataParameter* memory_data_param =
+      memory_layer.mutable_memory_data_param();
+  memory_data_param->set_batch_size(shape[0]);
+  memory_data_param->set_channels(shape[1]);
+  memory_data_param->set_height(shape[2]);
+  memory_data_param->set_width(shape[3]);
+}
+void SilenceLayer(caffe::NetParameter& net_param,
+                  const std::string& name,
+                  const std::vector<std::string>& bottoms,
+                  const std::vector<std::string>& tops,
+                  const boost::optional<caffe::Phase>& include_phase) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "Silence", bottoms, tops, include_phase);
+}
+void ReluLayer(caffe::NetParameter& net_param,
+               const std::string& name,
+               const std::vector<std::string>& bottoms,
+               const std::vector<std::string>& tops,
+               const boost::optional<caffe::Phase>& include_phase) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "ReLU", bottoms, tops, include_phase);
+  caffe::ReLUParameter* relu_param = layer.mutable_relu_param();
+  relu_param->set_negative_slope(0.01);
+}
+void IPLayer(caffe::NetParameter& net_param,
+             const std::string& name,
+             const std::vector<std::string>& bottoms,
+             const std::vector<std::string>& tops,
+             const boost::optional<caffe::Phase>& include_phase,
+             const int num_output) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "InnerProduct", bottoms, tops, include_phase);
+  caffe::InnerProductParameter* ip_param = layer.mutable_inner_product_param();
+  ip_param->set_num_output(num_output);
+  caffe::FillerParameter* weight_filler = ip_param->mutable_weight_filler();
+  weight_filler->set_type("gaussian");
+  weight_filler->set_std(0.01);
+  // caffe::FillerParameter* bias_filler = ip_param->mutable_bias_filler();
+  // bias_filler->set_type("constant");
+  // bias_filler->set_value(1);
+}
+void ConcatLayer(caffe::NetParameter& net_param,
+                 const std::string& name,
+                 const std::vector<std::string>& bottoms,
+                 const std::vector<std::string>& tops,
+                 const boost::optional<caffe::Phase>& include_phase,
+                 const int& axis) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "Concat", bottoms, tops, include_phase);
+  caffe::ConcatParameter* concat_param = layer.mutable_concat_param();
+  concat_param->set_axis(axis);
+}
+void EuclideanLossLayer(caffe::NetParameter& net_param,
+                        const std::string& name,
+                        const std::vector<std::string>& bottoms,
+                        const std::vector<std::string>& tops,
+                        const boost::optional<caffe::Phase>& include_phase) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "EuclideanLoss", bottoms, tops, include_phase);
+}
+caffe::NetParameter CreateActorNet(int state_size) {
+  caffe::NetParameter np;
+  np.set_name("Actor");
+  np.set_force_backward(true);
+  MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
+                  boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
+  SilenceLayer(np, "silence", {"dummy1"}, {}, boost::none);
+  IPLayer(np, "ip1_layer", {states_blob_name}, {"ip1"}, boost::none, 1024);
+  ReluLayer(np, "ip1_relu_layer", {"ip1"}, {"ip1"}, boost::none);
+  IPLayer(np, "ip2_layer", {"ip1"}, {"ip2"}, boost::none, 512);
+  ReluLayer(np, "ip2_relu_layer", {"ip2"}, {"ip2"}, boost::none);
+  IPLayer(np, "ip3_layer", {"ip2"}, {"ip3"}, boost::none, 256);
+  ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
+  IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
+  ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
+  IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
+  IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
+  return np;
+}
+caffe::NetParameter CreateCriticNet(int state_size) {
+  caffe::NetParameter np;
+  np.set_name("Critic");
+  np.set_force_backward(true);
+  MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
+                  boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
+  MemoryDataLayer(np, action_input_layer_name, {actions_blob_name,"dummy2"},
+                  boost::none, {kMinibatchSize, kStateInputCount, kActionSize, 1});
+  MemoryDataLayer(np, action_params_input_layer_name,
+                  {action_params_blob_name,"dummy3"},
+                  boost::none, {kMinibatchSize, kStateInputCount, kActionParamSize, 1});
+  MemoryDataLayer(np, target_input_layer_name, {targets_blob_name,"dummy4"},
+                  boost::none, {kMinibatchSize, 1, 1, 1});
+  SilenceLayer(np, "silence", {"dummy1","dummy2","dummy3","dummy4"}, {}, boost::none);
+  ConcatLayer(np, "concat",
+              {states_blob_name,actions_blob_name,action_params_blob_name},
+              {"state_actions"}, boost::none, 2);
+  IPLayer(np, "ip1_layer", {"state_actions"}, {"ip1"}, boost::none, 1024);
+  ReluLayer(np, "ip1_relu_layer", {"ip1"}, {"ip1"}, boost::none);
+  IPLayer(np, "ip2_layer", {"ip1"}, {"ip2"}, boost::none, 512);
+  ReluLayer(np, "ip2_relu_layer", {"ip2"}, {"ip2"}, boost::none);
+  IPLayer(np, "ip3_layer", {"ip2"}, {"ip3"}, boost::none, 256);
+  ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
+  IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
+  ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
+  IPLayer(np, q_values_layer_name, {"ip4"}, {q_values_blob_name}, boost::none, 1);
+  EuclideanLossLayer(np, "loss", {q_values_blob_name, targets_blob_name},
+                     {loss_blob_name}, boost::none);
+  return np;
+}
+
+
 DQN::DQN(caffe::SolverParameter& actor_solver_param,
          caffe::SolverParameter& critic_solver_param,
-         std::string save_path) :
+         std::string save_path, int state_size) :
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
@@ -211,7 +351,9 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         smoothed_critic_loss_(0),
         smoothed_actor_loss_(0),
         last_snapshot_iter_(0),
-        save_path_(save_path) {
+        save_path_(save_path),
+        state_size_(state_size),
+  state_input_data_size_(kMinibatchSize * state_size * kStateInputCount) {
   if (FLAGS_seed <= 0) {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     LOG(INFO) << "Seeding RNG to time (seed = " << seed << ")";
@@ -388,13 +530,13 @@ void DQN::Initialize() {
 #endif
   // Check that nets have the necessary layers and blobs
   HasBlobSize(*actor_net_, states_blob_name,
-              {kMinibatchSize, kStateInputCount, kStateSize, 1});
+              {kMinibatchSize, kStateInputCount, state_size_, 1});
   HasBlobSize(*actor_net_, actions_blob_name,
               {kMinibatchSize, kActionSize});
   HasBlobSize(*actor_net_, action_params_blob_name,
               {kMinibatchSize, kActionParamSize});
   HasBlobSize(*critic_net_, states_blob_name,
-              {kMinibatchSize, kStateInputCount, kStateSize, 1});
+              {kMinibatchSize, kStateInputCount, state_size_, 1});
   HasBlobSize(*critic_net_, actions_blob_name,
               {kMinibatchSize, 1, kActionSize, 1});
   HasBlobSize(*critic_net_, action_params_blob_name,
@@ -538,8 +680,7 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   CHECK(actor.has_blob(actions_blob_name));
   CHECK(actor.has_blob(action_params_blob_name));
   CHECK_LE(states_batch.size(), kMinibatchSize);
-  std::vector<float> states_input(kStateInputDataSize, 0.0f);
-  // std::vector<float> target_input(kTargetInputDataSize, 0.0f);
+  std::vector<float> states_input(state_input_data_size_, 0.0f);
   const auto states_blob = actor.blob_by_name(states_blob_name);
   for (int n = 0; n < states_batch.size(); ++n) {
     for (int c = 0; c < kStateInputCount; ++c) {
@@ -677,7 +818,7 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   std::vector<InputStates> next_states_batch;
   next_states_batch.reserve(kMinibatchSize);
   // Raw data used for input to networks
-  std::vector<float> states_input(kStateInputDataSize, 0.0f);
+  std::vector<float> states_input(state_input_data_size_, 0.0f);
   std::vector<float> action_input(kActionInputDataSize, 0.0f);
   std::vector<float> action_params_input(kActionParamsInputDataSize, 0.0f);
   std::vector<float> target_input(kTargetInputDataSize, 0.0f);
@@ -709,14 +850,30 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       next_states_batch.push_back(next_states);
     }
   }
+  std::vector<float> advantage(kMinibatchSize, 0.0f);
+  if (FLAGS_advantage_update) {
+    // Q(s,a) - Q-Values for the actions taken in the reply memory
+    const std::vector<float> q_s_a =
+        CriticForward(*critic_target_net_, states_batch, actions_batch);
+    // Q(s,a*) - Q-values for the actions the actor would currently take
+    const std::vector<float> q_s_aPrime =
+        CriticForwardThroughActor(
+            *critic_target_net_, *actor_target_net_, states_batch);
+    for (int n = 0; n < kMinibatchSize; ++n) {
+      advantage[n] = q_s_a[n] - q_s_aPrime[n]; // TODO: Remove negative values?
+    }
+  }
   // Generate targets using the target nets
   const std::vector<float> target_q_values =
       CriticForwardThroughActor(
           *critic_target_net_, *actor_target_net_, next_states_batch);
   int target_value_idx = 0;
   for (int n = 0; n < kMinibatchSize; ++n) {
-    const float target = terminal[n] ? rewards_batch[n] :
+    float target = terminal[n] ? rewards_batch[n] :
         rewards_batch[n] + gamma_ * target_q_values[target_value_idx++];
+    if (FLAGS_advantage_update) {
+      target -= FLAGS_alpha * advantage[n];
+    }
     CHECK(std::isfinite(target)) << "Target not finite!";
     target_input[target_blob->offset(n,0,0,0)] = target;
   }
@@ -821,7 +978,7 @@ float DQN::UpdateCritic() {
   // Generate target_q_values using the critic_target_net_
   const std::vector<float> target_q_values =
       CriticForwardThroughActor(*critic_target_net_, *actor_target_net_, target_states_batch);
-  std::vector<float> states_input(kStateInputDataSize, 0.0f);
+  std::vector<float> states_input(state_input_data_size_, 0.0f);
   std::vector<float> action_input(kActionInputDataSize, 0.0f);
   std::vector<float> action_params_input(kActionParamsInputDataSize, 0.0f);
   std::vector<float> target_input(kTargetInputDataSize, 0.0f);
@@ -915,7 +1072,7 @@ float DQN::UpdateActor(caffe::Net<float>& critic) {
 
   // Option 2: Converts Critic Diff --> Softmax Label
   // Find the index of the action the critic most wants to take
-  // std::vector<float> states_input(kStateInputDataSize, 0.0f);
+  // std::vector<float> states_input(state_input_data_size_, 0.0f);
   // for (int n = 0; n < kMinibatchSize; ++n) {
   //   for (int c = 0; c < kStateInputCount; ++c) {
   //     const auto& state_data = states_batch[n][c];
@@ -1055,7 +1212,7 @@ std::vector<float> DQN::CriticForward(caffe::Net<float>& critic,
   const auto states_blob = critic.blob_by_name(states_blob_name);
   const auto actions_blob = critic.blob_by_name(actions_blob_name);
   const auto action_params_blob = critic.blob_by_name(action_params_blob_name);
-  std::vector<float> states_input(kStateInputDataSize, 0.0f);
+  std::vector<float> states_input(state_input_data_size_, 0.0f);
   std::vector<float> action_input(kActionInputDataSize, 0.0f);
   std::vector<float> action_params_input(kActionParamsInputDataSize, 0.0f);
   std::vector<float> target_input(kTargetInputDataSize, 0.0f);
@@ -1172,11 +1329,11 @@ void DQN::SnapshotReplayMemory(const std::string& filename) {
     if (terminal) { // Save the history of states
       for (int i = 0; i < kStateInputCount - 1; ++i) {
         const StateDataSp state = states[i];
-        out.write((char*)state->begin(), kStateSize * sizeof(float));
+        out.write((char*)state->data(), state_size_ * sizeof(float));
       }
     }
     const StateDataSp curr_state = states.back();
-    out.write((char*)curr_state->begin(), kStateSize * sizeof(float));
+    out.write((char*)curr_state->data(), state_size_ * sizeof(float));
     const ActorOutput& actor_output = std::get<1>(t);
     out.write((char*)&actor_output, sizeof(ActorOutput));
     const float& reward = std::get<2>(t);
@@ -1209,13 +1366,13 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     if (terminal) {
       past_states.clear();
       for (int i = 0; i < kStateInputCount - 1; ++i) {
-        StateDataSp state = std::make_shared<StateData>();
-        in.read((char*)state->begin(), kStateSize * sizeof(float));
+        StateDataSp state = std::make_shared<StateData>(state_size_);
+        in.read((char*)state->data(), state_size_ * sizeof(float));
         past_states.push_back(state);
       }
     }
-    StateDataSp state = std::make_shared<StateData>();
-    in.read((char*)state->begin(), kStateSize * sizeof(float));
+    StateDataSp state = std::make_shared<StateData>(state_size_);
+    in.read((char*)state->data(), state_size_ * sizeof(float));
     past_states.push_back(state);
     while (past_states.size() > kStateInputCount) {
       past_states.pop_front();

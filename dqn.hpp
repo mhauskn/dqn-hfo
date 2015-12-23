@@ -17,16 +17,14 @@ constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
 constexpr auto kActionSize = 4;
 constexpr auto kActionParamSize = 6;
-constexpr auto kStateSize = 66;
 
-constexpr auto kStateInputDataSize = kMinibatchSize * kStateSize * kStateInputCount;
 constexpr auto kActionInputDataSize = kMinibatchSize * kActionSize;
 constexpr auto kActionParamsInputDataSize = kMinibatchSize * kActionParamSize;
 constexpr auto kTargetInputDataSize = kMinibatchSize * kActionSize;
 constexpr auto kFilterInputDataSize = kMinibatchSize * kActionSize;
 
 using ActorOutput = std::array<float, kActionSize + kActionParamSize>;
-using StateData   = std::array<float, kStateSize>;
+using StateData   = std::vector<float>;
 using StateDataSp = std::shared_ptr<StateData>;
 using InputStates = std::array<StateDataSp, kStateInputCount>;
 using Transition  = std::tuple<InputStates, ActorOutput,
@@ -57,7 +55,7 @@ class DQN {
 public:
   DQN(caffe::SolverParameter& actor_solver_param,
       caffe::SolverParameter& critic_solver_param,
-      std::string save_path);
+      std::string save_path, int state_size);
 
   // Benchmark the speed of updates
   void Benchmark(int iterations=1000);
@@ -124,6 +122,7 @@ public:
   int max_iter() const { return std::max(actor_iter(), critic_iter()); }
   int critic_iter() const { return critic_solver_->iter(); }
   int actor_iter() const { return actor_solver_->iter(); }
+  int state_size() const { return state_size_; }
 
 protected:
   // Initialize DQN. Called by the constructor
@@ -193,7 +192,12 @@ protected:
   float smoothed_critic_loss_, smoothed_actor_loss_;
   int last_snapshot_iter_;
   std::string save_path_;
+  const int state_size_; // Number of state features
+  const int state_input_data_size_;
 };
+
+caffe::NetParameter CreateActorNet(int state_size);
+caffe::NetParameter CreateCriticNet(int state_size);
 
 /**
  * Converts an ActorOutput into an action

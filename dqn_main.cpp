@@ -40,7 +40,8 @@ DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates")
 DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 // HFO Args
-DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --defense-npcs 1 --fullstate --frames-per-trial 500",
+DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
+DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --fullstate --frames-per-trial 500",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
@@ -166,8 +167,9 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
   std::deque<dqn::StateDataSp> past_states;
   while (!game.episode_over) {
     const std::vector<float>& current_state = hfo.getState();
-    CHECK_EQ(current_state.size(), dqn::kStateSize);
-    dqn::StateDataSp current_state_sp = std::make_shared<dqn::StateData>();
+    CHECK_EQ(current_state.size(), dqn.state_size());
+    dqn::StateDataSp current_state_sp
+        = std::make_shared<dqn::StateData>(dqn.state_size());
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     past_states.push_back(current_state_sp);
     if (past_states.size() < dqn::kStateInputCount) {
@@ -197,8 +199,9 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
       float reward = game.reward();
       if (update) {
         const std::vector<float>& next_state = hfo.getState();
-        CHECK_EQ(next_state.size(), dqn::kStateSize);
-        dqn::StateDataSp next_state_sp = std::make_shared<dqn::StateData>();
+        CHECK_EQ(next_state.size(), dqn.state_size());
+        dqn::StateDataSp next_state_sp
+            = std::make_shared<dqn::StateData>(dqn.state_size());
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (game.status == IN_GAME) ?
             dqn::Transition(input_states, actor_output, reward, next_state_sp):
@@ -320,7 +323,8 @@ int main(int argc, char** argv) {
     srand(std::hash<std::string>()(save_path.native()));
     FLAGS_port = rand() % 40000 + 20000;
   }
-  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port);
+  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port)
+      + " --defense-npcs " + std::to_string(FLAGS_defense_npcs);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_evaluate) { cmd += " --no-logging"; }
   cmd += " &";
@@ -329,12 +333,29 @@ int main(int argc, char** argv) {
 
   HFOEnvironment hfo;
   hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
+  int num_features = hfo.getState().size();
 
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
   caffe::ReadProtoFromTextFileOrDie(FLAGS_actor_solver, &actor_solver_param);
   caffe::ReadProtoFromTextFileOrDie(FLAGS_critic_solver, &critic_solver_param);
+  caffe::NetParameter* actor_net_param = actor_solver_param.mutable_net_param();
+  std::string actor_net_filename = save_path.native() + "_actor.prototxt";
+  if (boost::filesystem::is_regular_file(actor_net_filename)) {
+    caffe::ReadProtoFromTextFileOrDie(actor_net_filename.c_str(), actor_net_param);
+  } else {
+    actor_net_param->CopyFrom(dqn::CreateActorNet(num_features));
+    WriteProtoToTextFile(*actor_net_param, actor_net_filename.c_str());
+  }
+  caffe::NetParameter* critic_net_param = critic_solver_param.mutable_net_param();
+  std::string critic_net_filename = save_path.native() + "_critic.prototxt";
+  if (boost::filesystem::is_regular_file(critic_net_filename)) {
+    caffe::ReadProtoFromTextFileOrDie(critic_net_filename.c_str(), critic_net_param);
+  } else {
+    critic_net_param->CopyFrom(dqn::CreateCriticNet(num_features));
+    WriteProtoToTextFile(*critic_net_param, critic_net_filename.c_str());
+  }
   actor_solver_param.set_snapshot_prefix((save_path.native() + "_actor").c_str());
   critic_solver_param.set_snapshot_prefix((save_path.native() + "_critic").c_str());
   if (FLAGS_actor_max_iter > 0) {
@@ -344,7 +365,8 @@ int main(int argc, char** argv) {
     critic_solver_param.set_max_iter(FLAGS_critic_max_iter);
   }
 
-  dqn::DQN dqn(actor_solver_param, critic_solver_param, save_path.native());
+  dqn::DQN dqn(actor_solver_param, critic_solver_param, save_path.native(),
+               num_features);
 
   // Load actor/critic/memory
   if (!FLAGS_actor_snapshot.empty()) {
