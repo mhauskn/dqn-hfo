@@ -31,7 +31,11 @@ DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
 DEFINE_bool(advantage_update, false, "Use advantage learning.");
+DEFINE_bool(max_advantage_update, false, "Take a max during advantage learning.");
 DEFINE_double(alpha, .6, "Advantage learning gain");
+DEFINE_bool(invert_diff, false, "Invert gradients past boundaries.");
+DEFINE_bool(zero_diff, false, "Zero gradients past boundaries.");
+DEFINE_bool(squash_diff, false, "Squash gradients past boundaries.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -220,6 +224,32 @@ void PopulateLayer(caffe::LayerParameter& layer,
     layer.add_include()->set_phase(*include_phase);
   }
 }
+void ConcatLayer(caffe::NetParameter& net_param,
+                 const std::string& name,
+                 const std::vector<std::string>& bottoms,
+                 const std::vector<std::string>& tops,
+                 const boost::optional<caffe::Phase>& include_phase,
+                 const int& axis) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "Concat", bottoms, tops, include_phase);
+  caffe::ConcatParameter* concat_param = layer.mutable_concat_param();
+  concat_param->set_axis(axis);
+}
+void SliceLayer(caffe::NetParameter& net_param,
+                const std::string& name,
+                const std::vector<std::string>& bottoms,
+                const std::vector<std::string>& tops,
+                const boost::optional<caffe::Phase>& include_phase,
+                const int axis,
+                const std::vector<int>& slice_points) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "Slice", bottoms, tops, include_phase);
+  caffe::SliceParameter* slice_param = layer.mutable_slice_param();
+  slice_param->set_axis(axis);
+  for (auto& p : slice_points) {
+    slice_param->add_slice_point(p);
+  }
+}
 void MemoryDataLayer(caffe::NetParameter& net_param,
                      const std::string& name,
                      const std::vector<std::string>& tops,
@@ -253,6 +283,44 @@ void ReluLayer(caffe::NetParameter& net_param,
   caffe::ReLUParameter* relu_param = layer.mutable_relu_param();
   relu_param->set_negative_slope(0.01);
 }
+void TanhLayer(caffe::NetParameter& net_param,
+               const std::string& name,
+               const std::vector<std::string>& bottoms,
+               const std::vector<std::string>& tops,
+               const boost::optional<caffe::Phase>& include_phase) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "TanH", bottoms, tops, include_phase);
+}
+void EltwiseLayer(caffe::NetParameter& net_param,
+                  const std::string& name,
+                  const std::vector<std::string>& bottoms,
+                  const std::vector<std::string>& tops,
+                  const boost::optional<caffe::Phase>& include_phase,
+                  const caffe::EltwiseParameter::EltwiseOp& op) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "Eltwise", bottoms, tops, include_phase);
+  caffe::EltwiseParameter* eltwise_param = layer.mutable_eltwise_param();
+  eltwise_param->set_operation(op);
+}
+void DummyDataLayer(caffe::NetParameter& net_param,
+                    const std::string& name,
+                    const std::vector<std::string>& tops,
+                    const boost::optional<caffe::Phase>& include_phase,
+                    const std::vector<std::vector<float> > shapes,
+                    const std::vector<float> values) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "DummyData", {}, tops, include_phase);
+  caffe::DummyDataParameter* param = layer.mutable_dummy_data_param();
+  for (int i=0; i<values.size(); ++i) {
+    caffe::BlobShape* shape = param->add_shape();
+    for (int j=0; j<shapes[i].size(); ++j) {
+      shape->add_dim(shapes[i][j]);
+    }
+    caffe::FillerParameter* filler = param->add_data_filler();
+    filler->set_type("constant");
+    filler->set_value(values[i]);
+  }
+}
 void IPLayer(caffe::NetParameter& net_param,
              const std::string& name,
              const std::vector<std::string>& bottoms,
@@ -269,17 +337,6 @@ void IPLayer(caffe::NetParameter& net_param,
   // caffe::FillerParameter* bias_filler = ip_param->mutable_bias_filler();
   // bias_filler->set_type("constant");
   // bias_filler->set_value(1);
-}
-void ConcatLayer(caffe::NetParameter& net_param,
-                 const std::string& name,
-                 const std::vector<std::string>& bottoms,
-                 const std::vector<std::string>& tops,
-                 const boost::optional<caffe::Phase>& include_phase,
-                 const int& axis) {
-  caffe::LayerParameter& layer = *net_param.add_layer();
-  PopulateLayer(layer, name, "Concat", bottoms, tops, include_phase);
-  caffe::ConcatParameter* concat_param = layer.mutable_concat_param();
-  concat_param->set_axis(axis);
 }
 void EuclideanLossLayer(caffe::NetParameter& net_param,
                         const std::string& name,
@@ -314,11 +371,45 @@ caffe::NetParameter CreateCriticNet(int state_size) {
   np.set_force_backward(true);
   MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
-  MemoryDataLayer(np, action_input_layer_name, {actions_blob_name,"dummy2"},
+  MemoryDataLayer(np, action_input_layer_name,
+                  {FLAGS_squash_diff?"unsquashed_actions":actions_blob_name,"dummy2"},
                   boost::none, {kMinibatchSize, kStateInputCount, kActionSize, 1});
   MemoryDataLayer(np, action_params_input_layer_name,
-                  {action_params_blob_name,"dummy3"},
+                  {FLAGS_squash_diff?"unsquashed_action_params":action_params_blob_name,"dummy3"},
                   boost::none, {kMinibatchSize, kStateInputCount, kActionParamSize, 1});
+  if (FLAGS_squash_diff) {
+    DummyDataLayer(np, "dummy_data",
+                   {"two","minus_one","1_over_180","1_over_50","minus_1"},
+                   boost::none,
+                   {{kMinibatchSize, kStateInputCount, kActionSize, 1},
+                     {kMinibatchSize, kStateInputCount, kActionSize, 1},
+                     {kMinibatchSize, kStateInputCount, 4, 1},
+                     {kMinibatchSize, kStateInputCount, 2, 1},
+                     {kMinibatchSize, kStateInputCount, 2, 1}},
+                   {2.,-1.,1./180.,.02,-1.});
+    EltwiseLayer(np, "act1", {"unsquashed_actions","two"},
+                 {"a1"}, boost::none, caffe::EltwiseParameter::PROD);
+    EltwiseLayer(np, "act2", {"a1","minus_one"},
+                 {"a2"}, boost::none, caffe::EltwiseParameter::SUM);
+    TanhLayer(np, "action_input_tanh", {"a2"},
+                 {actions_blob_name}, boost::none);
+    SliceLayer(np, "slice", {"unsquashed_action_params"},
+               {"p0","p1","p2","p3","p4","p5"}, boost::none, 2, {1,2,3,4,5});
+    ConcatLayer(np, "concat1", {"p1","p2","p3","p5"}, // [-180,180]
+                {"degrees"}, boost::none, 2);
+    EltwiseLayer(np, "degree1", {"unsquashed_actions","1_over_180"}, // * 1/180
+                 {"degrees2"}, boost::none, caffe::EltwiseParameter::PROD);
+    ConcatLayer(np, "concat2", {"p0","p4"}, // [0,100]
+                {"powers"}, boost::none, 2);
+    EltwiseLayer(np, "power2", {"powers","1_over_50"},
+                 {"power2"}, boost::none, caffe::EltwiseParameter::PROD);
+    EltwiseLayer(np, "power3", {"power2","minus_1"},
+                 {"power3"}, boost::none, caffe::EltwiseParameter::SUM);
+    ConcatLayer(np, "concat3", {"degrees2","power3"},
+                {action_params_blob_name}, boost::none, 2);
+    TanhLayer(np, "action_param_tanh", {action_params_blob_name},
+              {action_params_blob_name}, boost::none);
+  }
   MemoryDataLayer(np, target_input_layer_name, {targets_blob_name,"dummy4"},
                   boost::none, {kMinibatchSize, 1, 1, 1});
   SilenceLayer(np, "silence", {"dummy1","dummy2","dummy3","dummy4"}, {}, boost::none);
@@ -860,7 +951,11 @@ std::pair<float,float> DQN::UpdateActorCritic() {
         CriticForwardThroughActor(
             *critic_target_net_, *actor_target_net_, states_batch);
     for (int n = 0; n < kMinibatchSize; ++n) {
-      advantage[n] = q_s_a[n] - q_s_aPrime[n]; // TODO: Remove negative values?
+      if (FLAGS_max_advantage_update) {
+        advantage[n] = std::max(0.f, q_s_a[n] - q_s_aPrime[n]);
+      } else {
+        advantage[n] = q_s_a[n] - q_s_aPrime[n];
+      }
     }
   }
   // Generate targets using the target nets
@@ -909,10 +1004,18 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       float diff = action_diff[offset];
       float output = actor_output_batch[n][h];
       float min = -1.0; float max = 1.0;
-      if (diff < 0) {
-        diff *= (max - output) / (max - min);
-      } else if (diff > 0) {
-        diff *= (output - min) / (max - min);
+      if (FLAGS_zero_diff) {
+        if (output >= max && diff < 0) {
+          diff = 0;
+        } else if (output <= min && diff > 0) {
+          diff = 0;
+        }
+      } else if (FLAGS_invert_diff) {
+        if (diff < 0) {
+          diff *= (max - output) / (max - min);
+        } else if (diff > 0) {
+          diff *= (output - min) / (max - min);
+        }
       }
       action_diff[offset] = diff;
     }
@@ -926,10 +1029,18 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       } else if (h == 1 || h == 2 || h == 3 || h == 5) {
         min = -180; max = 180;
       }
-      if (diff < 0) {
-        diff *= (max - output) / (max - min);
-      } else if (diff > 0) {
-        diff *= (output - min) / (max - min);
+      if (FLAGS_zero_diff) {
+        if (output >= max && diff < 0) {
+          diff = 0;
+        } else if (output <= min && diff > 0) {
+          diff = 0;
+        }
+      } else if (FLAGS_invert_diff) {
+        if (diff < 0) {
+          diff *= (max - output) / (max - min);
+        } else if (diff > 0) {
+          diff *= (output - min) / (max - min);
+        }
       }
       param_diff[offset] = diff;
     }
