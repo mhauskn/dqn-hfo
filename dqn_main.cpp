@@ -40,8 +40,10 @@ DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates")
 DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 // HFO Args
+DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
+DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
 DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
-DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --fullstate --frames-per-trial 500",
+DEFINE_string(server_cmd, "./scripts/HFO --fullstate --frames-per-trial 500",
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
@@ -315,6 +317,8 @@ int main(int argc, char** argv) {
     FLAGS_port = rand() % 40000 + 20000;
   }
   std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port)
+      + " --offense-agents " + std::to_string(FLAGS_offense_agents)
+      + " --offense-npcs " + std::to_string(FLAGS_offense_npcs)
       + " --defense-npcs " + std::to_string(FLAGS_defense_npcs);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_evaluate) { cmd += " --no-logging"; }
