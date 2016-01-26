@@ -22,11 +22,8 @@ DEFINE_int32(seed, 0, "Seed the RNG. Default: time");
 DEFINE_double(tau, .001, "Step size for soft updates.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(memory, 500000, "Capacity of replay memory");
-DEFINE_int32(memory_threshold, 10000, "Number of transitions to start learning");
+DEFINE_int32(memory_threshold, 10000, "Number of transitions required to start learning");
 DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
-DEFINE_bool(update_actor, true, "Perform updates on actor.");
-DEFINE_bool(update_critic, true, "Perform updates on critic.");
-DEFINE_double(q_diff, -1.0, "Diff at Critic's Q-Values layer.");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
@@ -628,15 +625,6 @@ ActorOutput DQN::GetRandomActorOutput() {
   for (int i = 0; i < kActionSize; ++i) {
     actor_output[i] = std::uniform_real_distribution<float>(-1.0,1.0)(random_engine);
   }
-  // std::vector<float> actions(kActionSize);
-  // std::uniform_real_distribution<float> dist(0, 1);
-  // for (int i = 0; i < kActionSize; ++i) {
-  //   actions[i] = std::exp(dist(random_engine));
-  // }
-  // float sum = std::accumulate(actions.begin(), actions.end(), 0.0);
-  // for (int i = 0; i < kActionSize; ++i) {
-  //   actor_output[i] = actions[i] / sum;
-  // }
   actor_output[kActionSize + 0] = // Dash Power
       std::uniform_real_distribution<float>(-100.0, 100.0)(random_engine);
   actor_output[kActionSize + 1] = // Dash Angle
@@ -736,33 +724,25 @@ void DQN::Update() {
   std::pair<float,float> res = UpdateActorCritic();
   float critic_loss = res.first;
   float avg_q = res.second;
-  if (FLAGS_update_critic) {
-    if (critic_iter() % FLAGS_loss_display_iter == 0) {
-      LOG(INFO) << "Critic Iteration " << critic_iter()
-                << ", loss = " << smoothed_critic_loss_;
-      smoothed_critic_loss_ = 0;
-    }
-    smoothed_critic_loss_ += critic_loss / float(FLAGS_loss_display_iter);
+  if (critic_iter() % FLAGS_loss_display_iter == 0) {
+    LOG(INFO) << "Critic Iteration " << critic_iter()
+              << ", loss = " << smoothed_critic_loss_;
+    smoothed_critic_loss_ = 0;
   }
-  if (FLAGS_update_actor) {
-    if (actor_iter() % FLAGS_loss_display_iter == 0) {
-      LOG(INFO) << "Actor Iteration " << actor_iter()
-                << ", avg_q_value = " << smoothed_actor_loss_;
-      smoothed_actor_loss_ = 0;
-    }
-    smoothed_actor_loss_ += avg_q / float(FLAGS_loss_display_iter);
+  smoothed_critic_loss_ += critic_loss / float(FLAGS_loss_display_iter);
+  if (actor_iter() % FLAGS_loss_display_iter == 0) {
+    LOG(INFO) << "Actor Iteration " << actor_iter()
+              << ", avg_q_value = " << smoothed_actor_loss_;
+    smoothed_actor_loss_ = 0;
   }
-  bool critic_needs_snapshot = FLAGS_update_critic &&
+  smoothed_actor_loss_ += avg_q / float(FLAGS_loss_display_iter);
+  bool critic_needs_snapshot =
       critic_iter() >= last_snapshot_iter_ + FLAGS_snapshot_freq;
-  bool actor_needs_snapshot = FLAGS_update_actor &&
+  bool actor_needs_snapshot =
       actor_iter() >= last_snapshot_iter_ + FLAGS_snapshot_freq;
   if (critic_needs_snapshot || actor_needs_snapshot) {
     Snapshot();
-    if (FLAGS_update_critic && FLAGS_update_actor) {
-      last_snapshot_iter_ = max_iter();
-    } else {
-      last_snapshot_iter_ = FLAGS_update_critic ? critic_iter() : actor_iter();
-    }
+    last_snapshot_iter_ = max_iter();
   }
 }
 
@@ -873,9 +853,8 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       float(q_values.size());
   // Set the critic diff and run backward
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
-  for (int n = 0; n < kMinibatchSize; n++) {
-    q_values_diff[q_values_blob->offset(n,0,0,0)] = FLAGS_q_diff;
-  }
+  std::transform(q_values.begin(), q_values.end(), q_values_diff,
+                 std::bind1st(std::multiplies<float>(),-1));
   DLOG(INFO) << " [Backwards] " << critic_net_->name();
   critic_net_->BackwardFrom(GetLayerIndex(*critic_net_, q_values_layer_name));
   float* action_diff = critic_action_blob->mutable_cpu_diff();
@@ -1128,4 +1107,4 @@ void DQN::LoadReplayMemory(const std::string& filename) {
             << episodes << " episodes";
 }
 
-}
+} // namespace dqn
