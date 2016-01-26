@@ -361,8 +361,48 @@ caffe::NetParameter CreateActorNet(int state_size) {
   ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
   IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
   ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
-  IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
-  IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
+  // IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
+  // IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
+  if (FLAGS_squash_diff) {
+    DummyDataLayer(np, "dummy_data",
+                   {"one_half","one","180","50","plus_1"},
+                   boost::none,
+                   {{kMinibatchSize, kActionSize},
+                     {kMinibatchSize, kActionSize},
+                     {kMinibatchSize, 4},
+                     {kMinibatchSize, 2},
+                     {kMinibatchSize, 2}},
+                   {.5,1.,180.,50.,1.});
+    IPLayer(np, "action_layer", {"ip4"}, {"unsquashed_actions"}, boost::none, 4);
+    TanhLayer(np, "action_input_tanh", {"unsquashed_actions"}, {"tanh_actions"}, boost::none);
+    EltwiseLayer(np, "act1", {"tanh_actions","one_half"},
+                 {"a1"}, boost::none, caffe::EltwiseParameter::PROD);
+    EltwiseLayer(np, "act2", {"a1","one"},
+                 {actions_blob_name}, boost::none, caffe::EltwiseParameter::SUM);
+    // Action Params
+    IPLayer(np, "actionpara_layer", {"ip4"}, {"unsquashed_action_params"}, boost::none, 6);
+    TanhLayer(np, "action_param_tanh", {"unsquashed_action_params"},
+              {"tanh_params"}, boost::none);
+    // Action Params: Degrees
+    SliceLayer(np, "slice", {"tanh_params"},
+               {"powers","degrees"}, boost::none, 1, {2});
+    EltwiseLayer(np, "degree1", {"degrees","180"}, // *180
+                 {"degrees2"}, boost::none, caffe::EltwiseParameter::PROD);
+    SliceLayer(np, "slice", {"degrees2"},
+               {"d1","d2","d3","d4"}, boost::none, 1, {1,2,3});
+    // Action Params: Power
+    EltwiseLayer(np, "power2", {"powers","plus_1"}, // +1 = [0,2]
+                 {"power2"}, boost::none, caffe::EltwiseParameter::SUM);
+    EltwiseLayer(np, "power3", {"power2","50"}, // *50 = [0, 100]
+                 {"power3"}, boost::none, caffe::EltwiseParameter::PROD);
+    SliceLayer(np, "slice", {"power3"},
+               {"p1","p2"}, boost::none, 1, {1});
+    ConcatLayer(np, "concat1", {"p1","d1","d2","d3","p2","d4"},
+                {action_params_blob_name}, boost::none, 1);
+  } else {
+    IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
+    IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
+  }
   return np;
 }
 caffe::NetParameter CreateCriticNet(int state_size) {
@@ -372,44 +412,11 @@ caffe::NetParameter CreateCriticNet(int state_size) {
   MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
   MemoryDataLayer(np, action_input_layer_name,
-                  {FLAGS_squash_diff?"unsquashed_actions":actions_blob_name,"dummy2"},
+                  {actions_blob_name,"dummy2"},
                   boost::none, {kMinibatchSize, kStateInputCount, kActionSize, 1});
   MemoryDataLayer(np, action_params_input_layer_name,
-                  {FLAGS_squash_diff?"unsquashed_action_params":action_params_blob_name,"dummy3"},
+                  {action_params_blob_name,"dummy3"},
                   boost::none, {kMinibatchSize, kStateInputCount, kActionParamSize, 1});
-  if (FLAGS_squash_diff) {
-    DummyDataLayer(np, "dummy_data",
-                   {"two","minus_one","1_over_180","1_over_50","minus_1"},
-                   boost::none,
-                   {{kMinibatchSize, kStateInputCount, kActionSize, 1},
-                     {kMinibatchSize, kStateInputCount, kActionSize, 1},
-                     {kMinibatchSize, kStateInputCount, 4, 1},
-                     {kMinibatchSize, kStateInputCount, 2, 1},
-                     {kMinibatchSize, kStateInputCount, 2, 1}},
-                   {2.,-1.,1./180.,.02,-1.});
-    EltwiseLayer(np, "act1", {"unsquashed_actions","two"},
-                 {"a1"}, boost::none, caffe::EltwiseParameter::PROD);
-    EltwiseLayer(np, "act2", {"a1","minus_one"},
-                 {"a2"}, boost::none, caffe::EltwiseParameter::SUM);
-    TanhLayer(np, "action_input_tanh", {"a2"},
-                 {actions_blob_name}, boost::none);
-    SliceLayer(np, "slice", {"unsquashed_action_params"},
-               {"p0","p1","p2","p3","p4","p5"}, boost::none, 2, {1,2,3,4,5});
-    ConcatLayer(np, "concat1", {"p1","p2","p3","p5"}, // [-180,180]
-                {"degrees"}, boost::none, 2);
-    EltwiseLayer(np, "degree1", {"unsquashed_actions","1_over_180"}, // * 1/180
-                 {"degrees2"}, boost::none, caffe::EltwiseParameter::PROD);
-    ConcatLayer(np, "concat2", {"p0","p4"}, // [0,100]
-                {"powers"}, boost::none, 2);
-    EltwiseLayer(np, "power2", {"powers","1_over_50"},
-                 {"power2"}, boost::none, caffe::EltwiseParameter::PROD);
-    EltwiseLayer(np, "power3", {"power2","minus_1"},
-                 {"power3"}, boost::none, caffe::EltwiseParameter::SUM);
-    ConcatLayer(np, "concat3", {"degrees2","power3"},
-                {action_params_blob_name}, boost::none, 2);
-    TanhLayer(np, "action_param_tanh", {action_params_blob_name},
-              {action_params_blob_name}, boost::none);
-  }
   MemoryDataLayer(np, target_input_layer_name, {targets_blob_name,"dummy4"},
                   boost::none, {kMinibatchSize, 1, 1, 1});
   SilenceLayer(np, "silence", {"dummy1","dummy2","dummy3","dummy4"}, {}, boost::none);
