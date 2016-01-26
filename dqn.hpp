@@ -85,22 +85,8 @@ public:
   std::vector<ActorOutput> SelectActions(const std::vector<InputStates>& states_batch,
                                          double epsilon);
 
-  // Warps an action according to the gradients provided by the
-  // critic. The degree of warping is determined by a gain sampled
-  // uniformly from the range [min_gain, max_gain].
-  ActorOutput WarpAction(const InputStates& input_states, const ActorOutput& action,
-                         float min_gain=0, float max_gain=100);
-
   // Evaluate a state-action, returning the q-value.
   float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
-
-  // Assess the critic's (ignorant) optimism. Returns the probability
-  // that a random action is better than the actor's suggested action
-  // for the provided states
-  float AssessOptimism(int n_states=32, int n_samples_per_state=32);
-  float AssessOptimism(const InputStates& input_states, int n_samples=32);
-  std::vector<float> AssessOptimism(const std::vector<InputStates>& states_batch,
-                                    int n_samples=32);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);

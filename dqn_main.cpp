@@ -45,7 +45,6 @@ DEFINE_string(server_cmd, "./scripts/HFO --offense-agents 1 --fullstate --frames
               "Command executed to start the HFO server.");
 DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
-DEFINE_bool(warp_action, false, "Warp actions in direction of critic improvment.");
 DEFINE_bool(learn_online, true, "Update while playing. Otherwise just calls update.");
 
 double CalculateEpsilon(const int iter) {
@@ -161,7 +160,7 @@ class HFOGameState {
  */
 std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
                                       const double epsilon,
-                                      const bool update, float warp_level) {
+                                      const bool update) {
   HFOGameState game(hfo);
   hfo.act(DASH, 0, 0);
   std::deque<dqn::StateDataSp> past_states;
@@ -185,14 +184,6 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
       Action action = dqn::GetAction(actor_output);
       VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
               << " Action: " << hfo.ActionToString(action);
-      if (FLAGS_warp_action && warp_level > 0) {
-        const dqn::ActorOutput warped_output = dqn.WarpAction(
-            input_states, actor_output, 0.0, warp_level);
-        const Action warped_action = dqn::GetAction(warped_output);
-        VLOG(1) << "Warped Action: " << hfo.ActionToString(warped_action);
-        actor_output = warped_output;
-        action = warped_action;
-      }
       hfo.act(action.action, action.arg1, action.arg2);
       status_t status = hfo.step();
       game.update(current_state, status);
@@ -240,7 +231,7 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
   std::vector<int> successful_trial_steps;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
     std::pair<double,int> result = PlayOneEpisode(
-        hfo, dqn, FLAGS_evaluate_with_epsilon, false, 0);
+        hfo, dqn, FLAGS_evaluate_with_epsilon, false);
     scores.push_back(result.first);
     steps.push_back(result.second);
     if (result.first > 0) {
@@ -389,7 +380,7 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_benchmark) {
-    PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true, 0);
+    PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true);
     dqn.Benchmark(1000);
     return 0;
   }
@@ -397,24 +388,18 @@ int main(int argc, char** argv) {
   int last_eval_iter = 0;
   int last_snapshot_iter = 0;
   int episode = 0;
-  float warp_level = FLAGS_warp_action ? 1.0 : 0; // How much to warp actions by
   double best_score = std::numeric_limits<double>::min();
   while (dqn.actor_iter() < actor_solver_param.max_iter() &&
          dqn.critic_iter() < critic_solver_param.max_iter()) {
     if (FLAGS_learn_online) {
       double epsilon = CalculateEpsilon(dqn.max_iter());
-      std::pair<double,int> result = PlayOneEpisode(hfo, dqn, epsilon, true, warp_level);
+      std::pair<double,int> result = PlayOneEpisode(hfo, dqn, epsilon, true);
       LOG(INFO) << "Episode " << episode << " score = " << result.first
                 << ", steps = " << result.second
                 << ", epsilon = " << epsilon
                 << ", actor_iter = " << dqn.actor_iter()
                 << ", critic_iter = " << dqn.critic_iter()
                 << ", replay_mem_size = " << dqn.memory_size();
-      if (FLAGS_warp_action) {
-        LOG(INFO) << "Episode " << episode << ", warp_level = " << warp_level;
-        warp_level *= result.first > 0 ? 1.5 : 0.5;
-        warp_level = std::min(std::max(warp_level, 1.f), 100.f);
-      }
       episode++;
     } else {
       dqn.Update();

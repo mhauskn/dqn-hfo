@@ -672,31 +672,6 @@ ActorOutput DQN::SelectAction(const InputStates& last_states, const double epsil
   return SelectActions(std::vector<InputStates>{{last_states}}, epsilon)[0];
 }
 
-ActorOutput DQN::WarpAction(const InputStates& input_states, const ActorOutput& action,
-                            float min_gain, float max_gain) {
-  ActorOutput warped_action = action;
-  float q_value = CriticForward(*critic_net_, {{input_states}}, {{action}})[0];
-  const auto q_values_blob = critic_net_->blob_by_name(q_values_blob_name);
-  float* q_values_diff = q_values_blob->mutable_cpu_diff();
-  q_values_diff[q_values_blob->offset(0,0,0,0)] = FLAGS_q_diff;
-  critic_net_->BackwardFrom(GetLayerIndex(*critic_net_, q_values_layer_name));
-  const auto critic_actions_blob = critic_net_->blob_by_name(actions_blob_name);
-  const auto critic_action_params_blob = critic_net_->blob_by_name(action_params_blob_name);
-  float gain = std::uniform_real_distribution<float>(min_gain, max_gain)(random_engine);
-  VLOG(1) << "ActorOutput [Original] [Diff]: ";
-  for (int c = 0; c < kActionSize; ++c) {
-    warped_action[c] -= gain * critic_actions_blob->diff_at(0,0,c,0);
-    VLOG(1) << "  " << action[c] << " " << critic_actions_blob->diff_at(0,0,c,0);
-  }
-  for (int c = 0; c < kActionParamSize; ++c) {
-    warped_action[kActionSize + c] -= gain * critic_action_params_blob->diff_at(0,0,c,0);
-    VLOG(1) << "  " << action[kActionSize+c] << " " << critic_action_params_blob->diff_at(0,0,c,0);
-  }
-  float warped_q_value = CriticForward(*critic_net_, {{input_states}}, {{warped_action}})[0];
-  VLOG(1) << "Original Q-Value: " << q_value << ", Warped Q-Value: " << warped_q_value;
-  return warped_action;
-}
-
 float DQN::EvaluateAction(const InputStates& input_states,
                           const ActorOutput& actor_output) {
   return CriticForward(*critic_net_,
@@ -780,8 +755,7 @@ void DQN::Update() {
   if (FLAGS_update_critic) {
     if (critic_iter() % FLAGS_loss_display_iter == 0) {
       LOG(INFO) << "Critic Iteration " << critic_iter()
-                << ", loss = " << smoothed_critic_loss_
-                << ", Optimism = " << AssessOptimism();
+                << ", loss = " << smoothed_critic_loss_;
       smoothed_critic_loss_ = 0;
     }
     smoothed_critic_loss_ += critic_loss / float(FLAGS_loss_display_iter);
@@ -807,45 +781,6 @@ void DQN::Update() {
     }
   }
 }
-
-float DQN::AssessOptimism(int n_states, int n_samples_per_state) {
-  std::vector<float> results;
-  for (int i=0; i<n_states; ++i) {
-    std::vector<InputStates> states = SampleStatesFromMemory(kMinibatchSize);
-    std::vector<float> opt = AssessOptimism(states, n_samples_per_state);
-    results.insert(results.end(), opt.begin(), opt.end());
-  }
-  return std::accumulate(results.begin(), results.end(), 0.0) / float(results.size());
-}
-
-float DQN::AssessOptimism(const InputStates& input_states, int n_samples) {
-  return AssessOptimism(
-      std::vector<InputStates>{{input_states}}, n_samples).front();
-}
-
-std::vector<float>
-DQN::AssessOptimism(const std::vector<InputStates>& states_batch, int n_samples) {
-  std::vector<float> opt(states_batch.size(), 0.0);
-  // Q-Values for the actions that actor_net_ recommends
-  std::vector<float> actor_q_vals = CriticForwardThroughActor(
-      *critic_net_, *actor_net_, states_batch);
-  std::vector<ActorOutput> rand_actor_output_batch(states_batch.size());
-  for (int n = 0; n < n_samples; ++n) {
-    for (int i = 0; i < states_batch.size(); ++i) {
-      rand_actor_output_batch[i] = GetRandomActorOutput();
-    }
-    // The Q-Values for random actions
-    std::vector<float> rand_q_vals = CriticForward(
-        *critic_net_, states_batch, rand_actor_output_batch);
-    for (int i=0; i<states_batch.size(); ++i) {
-      if (rand_q_vals[i] > actor_q_vals[i]) {
-        opt[i] += 1.0 / float(n_samples);
-      }
-    }
-  }
-  return opt;
-}
-
 
 std::pair<float,float> DQN::UpdateActorCritic() {
   CHECK(critic_net_->has_blob(states_blob_name));
