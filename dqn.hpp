@@ -116,12 +116,6 @@ protected:
 
   // Update both the actor and critic.
   std::pair<float, float> UpdateActorCritic();
-  // Update DQN using one minibatch. Returns the loss.
-  float UpdateCritic();
-  // Updates the actor against the critic_net_. Returns diff from critic.
-  float UpdateActor();
-  // Update the actor network from the gradients provided by the critic
-  float UpdateActor(caffe::Net<float>& critic);
 
   // Randomly sample the replay memory n-times, returning transition indexes
   std::vector<int> SampleTransitionsFromMemory(int n);
