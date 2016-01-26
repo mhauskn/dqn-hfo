@@ -33,9 +33,6 @@ DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the ne
 DEFINE_bool(advantage_update, false, "Use advantage learning.");
 DEFINE_bool(max_advantage_update, false, "Take a max during advantage learning.");
 DEFINE_double(alpha, .6, "Advantage learning gain");
-DEFINE_bool(invert_diff, false, "Invert gradients past boundaries.");
-DEFINE_bool(zero_diff, false, "Zero gradients past boundaries.");
-DEFINE_bool(squash_diff, false, "Squash gradients past boundaries.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -361,48 +358,8 @@ caffe::NetParameter CreateActorNet(int state_size) {
   ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
   IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
   ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
-  // IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
-  // IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
-  if (FLAGS_squash_diff) {
-    DummyDataLayer(np, "dummy_data",
-                   {"one_half","one","180","50","plus_1"},
-                   boost::none,
-                   {{kMinibatchSize, kActionSize},
-                     {kMinibatchSize, kActionSize},
-                     {kMinibatchSize, 4},
-                     {kMinibatchSize, 2},
-                     {kMinibatchSize, 2}},
-                   {.5,1.,180.,50.,1.});
-    IPLayer(np, "action_layer", {"ip4"}, {"unsquashed_actions"}, boost::none, 4);
-    TanhLayer(np, "action_input_tanh", {"unsquashed_actions"}, {"tanh_actions"}, boost::none);
-    EltwiseLayer(np, "act1", {"tanh_actions","one_half"},
-                 {"a1"}, boost::none, caffe::EltwiseParameter::PROD);
-    EltwiseLayer(np, "act2", {"a1","one"},
-                 {actions_blob_name}, boost::none, caffe::EltwiseParameter::SUM);
-    // Action Params
-    IPLayer(np, "actionpara_layer", {"ip4"}, {"unsquashed_action_params"}, boost::none, 6);
-    TanhLayer(np, "action_param_tanh", {"unsquashed_action_params"},
-              {"tanh_params"}, boost::none);
-    // Action Params: Degrees
-    SliceLayer(np, "slice", {"tanh_params"},
-               {"powers","degrees"}, boost::none, 1, {2});
-    EltwiseLayer(np, "degree1", {"degrees","180"}, // *180
-                 {"degrees2"}, boost::none, caffe::EltwiseParameter::PROD);
-    SliceLayer(np, "slice", {"degrees2"},
-               {"d1","d2","d3","d4"}, boost::none, 1, {1,2,3});
-    // Action Params: Power
-    EltwiseLayer(np, "power2", {"powers","plus_1"}, // +1 = [0,2]
-                 {"power2"}, boost::none, caffe::EltwiseParameter::SUM);
-    EltwiseLayer(np, "power3", {"power2","50"}, // *50 = [0, 100]
-                 {"power3"}, boost::none, caffe::EltwiseParameter::PROD);
-    SliceLayer(np, "slice", {"power3"},
-               {"p1","p2"}, boost::none, 1, {1});
-    ConcatLayer(np, "concat1", {"p1","d1","d2","d3","p2","d4"},
-                {action_params_blob_name}, boost::none, 1);
-  } else {
-    IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
-    IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
-  }
+  IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
+  IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
   return np;
 }
 caffe::NetParameter CreateCriticNet(int state_size) {
@@ -1011,18 +968,10 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       float diff = action_diff[offset];
       float output = actor_output_batch[n][h];
       float min = -1.0; float max = 1.0;
-      if (FLAGS_zero_diff) {
-        if (output >= max && diff < 0) {
-          diff = 0;
-        } else if (output <= min && diff > 0) {
-          diff = 0;
-        }
-      } else if (FLAGS_invert_diff) {
-        if (diff < 0) {
-          diff *= (max - output) / (max - min);
-        } else if (diff > 0) {
-          diff *= (output - min) / (max - min);
-        }
+      if (diff < 0) {
+        diff *= (max - output) / (max - min);
+      } else if (diff > 0) {
+        diff *= (output - min) / (max - min);
       }
       action_diff[offset] = diff;
     }
@@ -1036,18 +985,10 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       } else if (h == 1 || h == 2 || h == 3 || h == 5) {
         min = -180; max = 180;
       }
-      if (FLAGS_zero_diff) {
-        if (output >= max && diff < 0) {
-          diff = 0;
-        } else if (output <= min && diff > 0) {
-          diff = 0;
-        }
-      } else if (FLAGS_invert_diff) {
-        if (diff < 0) {
-          diff *= (max - output) / (max - min);
-        } else if (diff > 0) {
-          diff *= (output - min) / (max - min);
-        }
+      if (diff < 0) {
+        diff *= (max - output) / (max - min);
+      } else if (diff > 0) {
+        diff *= (output - min) / (max - min);
       }
       param_diff[offset] = diff;
     }
