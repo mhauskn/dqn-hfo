@@ -1,9 +1,9 @@
-#include <cmath>
 #include <iostream>
 #include <HFO.hpp>
 #include <glog/logging.h>
 #include <gflags/gflags.h>
 #include "dqn.hpp"
+#include "hfo_game.hpp"
 #include <boost/filesystem.hpp>
 #include <thread>
 #include <mutex>
@@ -16,7 +16,6 @@ using namespace boost::filesystem;
 using namespace hfo;
 
 DEFINE_bool(gpu, true, "Use GPU to brew Caffe");
-DEFINE_bool(gui, false, "Open a GUI window");
 DEFINE_bool(benchmark, false, "Benchmark the network and exit");
 // Load/Save Args
 DEFINE_string(save, "", "Prefix for saving snapshots");
@@ -39,13 +38,6 @@ DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation 
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
-// HFO Args
-DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
-DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
-DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
-DEFINE_string(server_cmd, "./scripts/HFO --fullstate --frames-per-trial 500",
-              "Command executed to start the HFO server.");
-DEFINE_int32(port, -1, "Port to use for server/client.");
 // Misc Args
 DEFINE_bool(learn_online, true, "Update while playing. Otherwise just calls update.");
 
@@ -56,106 +48,6 @@ double CalculateEpsilon(const int iter) {
     return FLAGS_epsilon;
   }
 }
-
-class HFOGameState {
- public:
-  HFOEnvironment& hfo;
-  float old_ball_prox, ball_prox_delta;
-  float old_kickable, kickable_delta;
-  float old_ball_dist_goal, ball_dist_goal_delta;
-  int steps;
-  double total_reward;
-  status_t status;
-  bool episode_over;
-  bool got_kickable_reward;
-  HFOGameState(HFOEnvironment& hfo) :
-      hfo(hfo), old_ball_prox(0), ball_prox_delta(0), old_kickable(0),
-      kickable_delta(0), old_ball_dist_goal(0), ball_dist_goal_delta(0),
-      steps(0), total_reward(0), status(IN_GAME),
-      episode_over(false), got_kickable_reward(false) {
-    VLOG(1) << "Creating new HFOGameState";
-  }
-  ~HFOGameState() {
-    VLOG(1) << "Destroying HFOGameState";
-    while (status == IN_GAME) {
-      hfo.act(DASH, 0, 0);
-      status = hfo.step();
-    }
-  }
-  void update(const std::vector<float>& current_state, status_t current_status) {
-    status = current_status;
-    if (status != IN_GAME) {
-      episode_over = true;
-    }
-    float ball_proximity = current_state[53];
-    float goal_proximity = current_state[15];
-    float ball_dist = 1.0 - ball_proximity;
-    float goal_dist = 1.0 - goal_proximity;
-    float kickable = current_state[12];
-    float ball_ang_sin_rad = current_state[51];
-    float ball_ang_cos_rad = current_state[52];
-    float ball_ang_rad = acos(ball_ang_cos_rad);
-    if (ball_ang_sin_rad < 0) { ball_ang_rad *= -1.; }
-    float goal_ang_sin_rad = current_state[13];
-    float goal_ang_cos_rad = current_state[14];
-    float goal_ang_rad = acos(goal_ang_cos_rad);
-    if (goal_ang_sin_rad < 0) { goal_ang_rad *= -1.; }
-    float alpha = std::max(ball_ang_rad, goal_ang_rad) - std::min(ball_ang_rad, goal_ang_rad);
-    // By law of cosines. Alpha is angle between ball and goal
-    float ball_dist_goal = sqrt(ball_dist*ball_dist + goal_dist*goal_dist -
-                                2.*ball_dist*goal_dist*cos(alpha));
-    VLOG(1) << "BallProx: " << ball_proximity << " BallDistGoal: " << ball_dist_goal;
-    if (steps > 0) {
-      ball_prox_delta = ball_proximity - old_ball_prox;
-      kickable_delta = kickable - old_kickable;
-      ball_dist_goal_delta = ball_dist_goal - old_ball_dist_goal;
-    }
-    old_ball_prox = ball_proximity;
-    old_kickable = kickable;
-    old_ball_dist_goal = ball_dist_goal;
-    if (episode_over) {
-      ball_prox_delta = 0;
-      kickable_delta = 0;
-      ball_dist_goal_delta = 0;
-    }
-    steps++;
-  }
-  float reward() {
-    float moveToBallReward = move_to_ball_reward();
-    float kickToGoalReward = 3. * kick_to_goal_reward();
-    float eotReward = 5. * EOT_reward();
-    float reward = moveToBallReward + kickToGoalReward + eotReward;
-    total_reward += reward;
-    VLOG(1) << "Overall_Reward: " << reward << " MTB: " << moveToBallReward
-            << " KTG: " << kickToGoalReward << " EOT: " << eotReward;
-    return reward;
-  }
-  // Reward for moving to ball and getting kickable. Ends episode once
-  // kickable is attained.
-  float move_to_ball_reward() {
-    float reward = ball_prox_delta;
-    if (kickable_delta >= 1 && !got_kickable_reward) {
-      reward += 1.0;
-      // episode_over = true;
-      got_kickable_reward = true;
-    }
-    return reward;
-  }
-  // Reward for kicking ball towards the goal
-  float kick_to_goal_reward() {
-    return -ball_dist_goal_delta;
-  }
-  float EOT_reward() {
-    if (status == GOAL) {
-      VLOG(1) << "GOAL"; return 1;
-    }
-    // else if (status == CAPTURED_BY_DEFENSE || status == OUT_OF_BOUNDS ||
-    //            status == OUT_OF_TIME) {
-    //   VLOG(1) << "FAIL"; return -1;
-    // }
-    return 0;
-  }
-};
 
 /**
  * Play one episode and return the total score and number of steps
@@ -311,23 +203,7 @@ int main(int argc, char** argv) {
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
 
-  // Start rcssserver3d
-  if (FLAGS_port < 0) {
-    srand(std::hash<std::string>()(save_path.native()));
-    FLAGS_port = rand() % 40000 + 20000;
-  }
-  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port)
-      + " --offense-agents " + std::to_string(FLAGS_offense_agents)
-      + " --offense-npcs " + std::to_string(FLAGS_offense_npcs)
-      + " --defense-npcs " + std::to_string(FLAGS_defense_npcs);
-  if (!FLAGS_gui) { cmd += " --headless"; }
-  if (!FLAGS_evaluate) { cmd += " --no-logging"; }
-  cmd += " &";
-  LOG(INFO) << "Starting server with command: " << cmd;
-  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
-
-  HFOEnvironment hfo;
-  hfo.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
+  HFOEnvironment hfo = CreateHFOEnvironment();
   int num_features = hfo.getState().size();
 
   // Construct the solver

@@ -74,8 +74,6 @@ public:
   void Snapshot(const std::string& snapshot_prefix, bool remove_old=false,
                 bool snapshot_memory=true);
 
-  // Generates a HFO action uniformly at random
-  hfo::Action GetRandomHFOAction();
   ActorOutput GetRandomActorOutput();
 
   // Select an action using epsilon-greedy action selection.

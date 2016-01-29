@@ -17,7 +17,6 @@ namespace dqn {
 
 using namespace hfo;
 
-// DQN Args
 DEFINE_int32(seed, 0, "Seed the RNG. Default: time");
 DEFINE_double(tau, .001, "Step size for soft updates.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
@@ -590,34 +589,6 @@ void DQN::Initialize() {
   CHECK(critic_net_->has_layer(q_values_layer_name));
   CloneNet(critic_net_, critic_target_net_);
   CloneNet(actor_net_, actor_target_net_);
-}
-
-Action DQN::GetRandomHFOAction() {
-  action_t action_indx = (action_t) std::uniform_int_distribution<int>(DASH, KICK)(random_engine);
-  float arg1, arg2;
-  switch (action_indx) {
-    case DASH:
-      arg1 = std::uniform_real_distribution<float>(-100.0, 100.0)(random_engine);
-      arg2 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      break;
-    case TURN:
-      arg1 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      arg2 = 0;
-      break;
-    case TACKLE:
-      arg1 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      arg2 = 0;
-      break;
-    case KICK:
-      arg1 = std::uniform_real_distribution<float>(0.0, 100.0)(random_engine);
-      arg2 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      break;
-    default:
-      LOG(FATAL) << "Invalid Action Index: " << action_indx;
-      break;
-  }
-  Action act = {action_indx, arg1, arg2};
-  return act;
 }
 
 ActorOutput DQN::GetRandomActorOutput() {
