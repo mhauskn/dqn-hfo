@@ -824,8 +824,9 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       float(q_values.size());
   // Set the critic diff and run backward
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
-  std::transform(q_values.begin(), q_values.end(), q_values_diff,
-                 std::bind1st(std::multiplies<float>(),-1));
+  for (int n = 0; n < kMinibatchSize; n++) {
+    q_values_diff[q_values_blob->offset(n,0,0,0)] = -1.0;
+  }
   DLOG(INFO) << " [Backwards] " << critic_net_->name();
   critic_net_->BackwardFrom(GetLayerIndex(*critic_net_, q_values_layer_name));
   float* action_diff = critic_action_blob->mutable_cpu_diff();
