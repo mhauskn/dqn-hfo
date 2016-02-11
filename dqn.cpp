@@ -12,6 +12,7 @@
 #include <boost/iostreams/filter/gzip.hpp>
 #include <glog/logging.h>
 #include <chrono>
+#include <caffe/layers/memory_data_layer.hpp>
 
 namespace dqn {
 
@@ -555,8 +556,8 @@ void DQN::Initialize() {
   critic_solver_param_.set_debug_info(true);
 #endif
   // Initialize net and solver
-  actor_solver_.reset(caffe::GetSolver<float>(actor_solver_param_));
-  critic_solver_.reset(caffe::GetSolver<float>(critic_solver_param_));
+  actor_solver_.reset(caffe::SolverRegistry<float>::CreateSolver(actor_solver_param_));
+  critic_solver_.reset(caffe::SolverRegistry<float>::CreateSolver(critic_solver_param_));
   actor_net_ = actor_solver_->net();
   critic_net_ = critic_solver_->net();
 #ifndef NDEBUG
@@ -868,7 +869,7 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   actor_actions_blob->ShareDiff(*critic_action_blob);
   actor_action_params_blob->ShareDiff(*critic_action_params_blob);
   DLOG(INFO) << " [Backwards] " << actor_net_->name();
-  actor_net_->Backward();
+  actor_net_->BackwardFrom(GetLayerIndex(*actor_net_, "actionpara_layer"));
   actor_solver_->ApplyUpdate();
   actor_solver_->set_iter(actor_solver_->iter() + 1);
   // Soft update the target networks

@@ -209,8 +209,8 @@ int main(int argc, char** argv) {
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
-  caffe::ReadProtoFromTextFileOrDie(FLAGS_actor_solver, &actor_solver_param);
-  caffe::ReadProtoFromTextFileOrDie(FLAGS_critic_solver, &critic_solver_param);
+  caffe::ReadSolverParamsFromTextFileOrDie(FLAGS_actor_solver, &actor_solver_param);
+  caffe::ReadSolverParamsFromTextFileOrDie(FLAGS_critic_solver, &critic_solver_param);
   caffe::NetParameter* actor_net_param = actor_solver_param.mutable_net_param();
   std::string actor_net_filename = save_path.native() + "_actor.prototxt";
   if (boost::filesystem::is_regular_file(actor_net_filename)) {
