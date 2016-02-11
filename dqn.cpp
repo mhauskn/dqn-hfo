@@ -22,7 +22,7 @@ DEFINE_int32(seed, 0, "Seed the RNG. Default: time");
 DEFINE_double(tau, .001, "Step size for soft updates.");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(memory, 500000, "Capacity of replay memory");
-DEFINE_int32(memory_threshold, 10000, "Number of transitions required to start learning");
+DEFINE_int32(memory_threshold, 1000, "Number of transitions required to start learning");
 DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");

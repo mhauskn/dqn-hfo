@@ -31,7 +31,7 @@ DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory)."
 DEFINE_int32(actor_max_iter, 0, "Custom max iter of the actor.");
 DEFINE_int32(critic_max_iter, 0, "Custom max iter of the critic.");
 // Epsilon-Greedy Args
-DEFINE_int32(explore, 100000, "Iterations for epsilon to reach given value.");
+DEFINE_int32(explore, 10000, "Iterations for epsilon to reach given value.");
 DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
 DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation mode");
 // Evaluation Args
