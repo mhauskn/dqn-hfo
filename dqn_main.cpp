@@ -28,8 +28,14 @@ DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate
 DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solverstate).");
 DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory).");
 // Solver Args
-DEFINE_int32(actor_max_iter, 0, "Custom max iter of the actor.");
-DEFINE_int32(critic_max_iter, 0, "Custom max iter of the critic.");
+DEFINE_string(solver, "Adam", "Solver Type.");
+DEFINE_double(momentum, .95, "Solver momentum.");
+DEFINE_double(momentum2, .999, "Solver momentum2.");
+DEFINE_double(actor_lr, .00001, "Solver learning rate.");
+DEFINE_double(critic_lr, .001, "Solver learning rate.");
+DEFINE_double(clip_grad, 10, "Clip gradients.");
+DEFINE_string(lr_policy, "fixed", "LR Policy.");
+DEFINE_int32(max_iter, 2000000, "Custom max iter.");
 // Epsilon-Greedy Args
 DEFINE_int32(explore, 10000, "Iterations for epsilon to reach given value.");
 DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
@@ -209,8 +215,6 @@ int main(int argc, char** argv) {
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
-  caffe::ReadSolverParamsFromTextFileOrDie(FLAGS_actor_solver, &actor_solver_param);
-  caffe::ReadSolverParamsFromTextFileOrDie(FLAGS_critic_solver, &critic_solver_param);
   caffe::NetParameter* actor_net_param = actor_solver_param.mutable_net_param();
   std::string actor_net_filename = save_path.native() + "_actor.prototxt";
   if (boost::filesystem::is_regular_file(actor_net_filename)) {
@@ -229,12 +233,20 @@ int main(int argc, char** argv) {
   }
   actor_solver_param.set_snapshot_prefix((save_path.native() + "_actor").c_str());
   critic_solver_param.set_snapshot_prefix((save_path.native() + "_critic").c_str());
-  if (FLAGS_actor_max_iter > 0) {
-    actor_solver_param.set_max_iter(FLAGS_actor_max_iter);
-  }
-  if (FLAGS_critic_max_iter > 0) {
-    critic_solver_param.set_max_iter(FLAGS_critic_max_iter);
-  }
+  actor_solver_param.set_max_iter(FLAGS_max_iter);
+  critic_solver_param.set_max_iter(FLAGS_max_iter);
+  actor_solver_param.set_type(FLAGS_solver);
+  critic_solver_param.set_type(FLAGS_solver);
+  actor_solver_param.set_base_lr(FLAGS_actor_lr);
+  critic_solver_param.set_base_lr(FLAGS_critic_lr);
+  actor_solver_param.set_lr_policy(FLAGS_lr_policy);
+  critic_solver_param.set_lr_policy(FLAGS_lr_policy);
+  actor_solver_param.set_momentum(FLAGS_momentum);
+  critic_solver_param.set_momentum(FLAGS_momentum);
+  actor_solver_param.set_momentum2(FLAGS_momentum2);
+  critic_solver_param.set_momentum2(FLAGS_momentum2);
+  actor_solver_param.set_clip_gradients(FLAGS_clip_grad);
+  critic_solver_param.set_clip_gradients(FLAGS_clip_grad);
 
   dqn::DQN dqn(actor_solver_param, critic_solver_param, save_path.native(),
                num_features);
