@@ -12,16 +12,16 @@ DEFINE_int32(defense_agents, 0, "Number of agents playing defense");
 DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 DEFINE_string(server_cmd, "./scripts/HFO --fullstate --frames-per-trial 500",
               "Command executed to start the HFO server.");
-DEFINE_int32(port, -1, "Port to use for server/client.");
 DEFINE_bool(gui, false, "Open a GUI window.");
 DEFINE_bool(log_game, false, "Log the HFO game.");
 
-HFOEnvironment CreateHFOEnvironment() {
-  if (FLAGS_port < 0) {
-    srand(time(NULL));
-    FLAGS_port = rand() % 40000 + 20000;
-  }
-  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(FLAGS_port)
+int NumStateFeatures() {
+  return 50 + 8 * (FLAGS_offense_agents + FLAGS_defense_npcs +
+                   FLAGS_offense_npcs + FLAGS_defense_agents);
+}
+
+HFOEnvironment CreateHFOEnvironment(int port) {
+  std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(port)
       + " --offense-agents " + std::to_string(FLAGS_offense_agents)
       + " --offense-npcs " + std::to_string(FLAGS_offense_npcs)
       + " --defense-agents " + std::to_string(FLAGS_defense_agents)
@@ -32,7 +32,7 @@ HFOEnvironment CreateHFOEnvironment() {
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
   HFOEnvironment hfo_env;
-  hfo_env.connectToAgentServer(FLAGS_port, LOW_LEVEL_FEATURE_SET);
+  hfo_env.connectToAgentServer(port, LOW_LEVEL_FEATURE_SET);
   return hfo_env;
 }
 

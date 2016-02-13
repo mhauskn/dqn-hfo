@@ -10,6 +10,7 @@
 #include <caffe/caffe.hpp>
 #include <boost/functional/hash.hpp>
 #include <boost/optional.hpp>
+#include <mutex>
 
 namespace dqn {
 
@@ -88,6 +89,7 @@ public:
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
+  void AddTransitions(const std::vector<Transition>& transitions);
 
   // Update the model(s)
   void Update();
@@ -107,6 +109,9 @@ public:
   int critic_iter() const { return critic_solver_->iter(); }
   int actor_iter() const { return actor_solver_->iter(); }
   int state_size() const { return state_size_; }
+
+  void lock_mutex() { mtx.lock(); }
+  void unlock_mutex() { mtx.unlock(); }
 
 protected:
   // Initialize DQN. Called by the constructor
@@ -172,6 +177,7 @@ protected:
   std::string save_path_;
   const int state_size_; // Number of state features
   const int state_input_data_size_;
+  std::mutex mtx;
 };
 
 caffe::NetParameter CreateActorNet(int state_size);

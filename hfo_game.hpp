@@ -4,7 +4,8 @@
 #include <HFO.hpp>
 #include <random>
 
-hfo::HFOEnvironment CreateHFOEnvironment();
+int NumStateFeatures();
+hfo::HFOEnvironment CreateHFOEnvironment(int port);
 hfo::Action GetRandomHFOAction(std::mt19937& random_engine);
 
 class HFOGameState {

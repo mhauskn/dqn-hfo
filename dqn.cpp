@@ -516,6 +516,7 @@ void DQN::Snapshot() {
 
 void DQN::Snapshot(const std::string& snapshot_prefix,
                    bool remove_old, bool snapshot_memory) {
+  mtx.lock();
   using namespace boost::filesystem;
   actor_solver_->Snapshot();
   critic_solver_->Snapshot();
@@ -548,6 +549,7 @@ void DQN::Snapshot(const std::string& snapshot_prefix,
     RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter - 1);
   }
   LOG(INFO) << "Snapshotting Finished!";
+  mtx.unlock();
 }
 
 void DQN::Initialize() {
@@ -683,10 +685,22 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
 }
 
 void DQN::AddTransition(const Transition& transition) {
+  mtx.lock();
   if (replay_memory_.size() == replay_memory_capacity_) {
     replay_memory_.pop_front();
   }
   replay_memory_.push_back(transition);
+  mtx.unlock();
+}
+
+void DQN::AddTransitions(const std::vector<Transition>& transitions) {
+  mtx.lock();
+  while (replay_memory_.size() + transitions.size() >= replay_memory_capacity_) {
+    replay_memory_.pop_front();
+  }
+  std::deque<Transition>::iterator it = replay_memory_.end();
+  replay_memory_.insert(it, transitions.begin(), transitions.end());
+  mtx.unlock();
 }
 
 void DQN::Update() {
@@ -719,6 +733,7 @@ void DQN::Update() {
 }
 
 std::pair<float,float> DQN::UpdateActorCritic() {
+  mtx.lock();
   CHECK(critic_net_->has_blob(states_blob_name));
   CHECK(critic_net_->has_blob(actions_blob_name));
   CHECK(critic_net_->has_blob(action_params_blob_name));
@@ -875,6 +890,7 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   // Soft update the target networks
   SoftUpdateNet(critic_net_, critic_target_net_, FLAGS_tau);
   SoftUpdateNet(actor_net_, actor_target_net_, FLAGS_tau);
+  mtx.unlock();
   return std::make_pair(critic_loss, avg_q);
 }
 

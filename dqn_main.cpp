@@ -46,6 +46,8 @@ DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 // Misc Args
 DEFINE_bool(learn_online, true, "Update while playing. Otherwise just calls update.");
+DEFINE_bool(mt, false, "Multithreaded learning");
+DEFINE_int32(player_threads, 6, "Number of threads playing games");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -61,6 +63,7 @@ double CalculateEpsilon(const int iter) {
 std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
                                       const double epsilon,
                                       const bool update) {
+  std::vector<dqn::Transition> exp;
   HFOGameState game(hfo);
   hfo.act(DASH, 0, 0);
   std::deque<dqn::StateDataSp> past_states;
@@ -79,7 +82,9 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
       }
       dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
+      dqn.lock_mutex();
       dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
+      dqn.unlock_mutex();
       VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
       Action action = dqn::GetAction(actor_output);
       VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
@@ -97,10 +102,14 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
         const auto transition = (game.status == IN_GAME) ?
             dqn::Transition(input_states, actor_output, reward, next_state_sp):
             dqn::Transition(input_states, actor_output, reward, boost::none);
-        dqn.AddTransition(transition);
-        dqn.Update();
+        exp.push_back(transition);
+        // dqn.AddTransition(transition);
+        // dqn.Update();
       }
     }
+  }
+  if (update) {
+    dqn.AddTransitions(exp);
   }
   return std::make_pair(game.total_reward, game.steps);
 }
@@ -150,6 +159,21 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
             << ", success_avg_steps = " << succ_steps_dist.first
             << ", success_steps_std = " << succ_steps_dist.second;
   return score_dist.first;
+}
+
+void KeepPlayingGames(int tid, dqn::DQN& dqn, int port) {
+  LOG(INFO) << "Player Thread " << tid << " reporting for duty.";
+  HFOEnvironment hfo = CreateHFOEnvironment(port + (100 * tid));
+  for (int episode = 0; dqn.max_iter() < FLAGS_max_iter; ++episode) {
+    double epsilon = CalculateEpsilon(dqn.max_iter());
+    std::pair<double,int> result = PlayOneEpisode(hfo, dqn, epsilon, true);
+    LOG(INFO) << "Episode " << episode << " score = " << result.first
+              << ", steps = " << result.second
+              << ", epsilon = " << epsilon
+              << ", actor_iter = " << dqn.actor_iter()
+              << ", critic_iter = " << dqn.critic_iter()
+              << ", replay_mem_size = " << dqn.memory_size();
+  }
 }
 
 int main(int argc, char** argv) {
@@ -209,8 +233,7 @@ int main(int argc, char** argv) {
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
 
-  HFOEnvironment hfo = CreateHFOEnvironment();
-  int num_features = hfo.getState().size();
+  int num_features = NumStateFeatures();
 
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
@@ -266,17 +289,38 @@ int main(int argc, char** argv) {
     dqn.LoadReplayMemory(FLAGS_memory_snapshot);
   }
 
+  srand(std::hash<std::string>()(save_path.native()));
+  int port = rand() % 40000 + 20000;
+
   if (FLAGS_evaluate) {
+    HFOEnvironment hfo = CreateHFOEnvironment(port);
     Evaluate(hfo, dqn);
     return 0;
   }
 
   if (FLAGS_benchmark) {
+    HFOEnvironment hfo = CreateHFOEnvironment(port);
     PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, true);
     dqn.Benchmark(1000);
     return 0;
   }
 
+  if (FLAGS_mt) {
+    std::thread player_threads[FLAGS_player_threads];
+    for (int i = 0; i < FLAGS_player_threads; ++i) {
+      player_threads[i] = std::thread(KeepPlayingGames, i, std::ref(dqn), port);
+    }
+    while (dqn.max_iter() < FLAGS_max_iter) {
+      dqn.Update();
+    }
+    for (int i = 0; i < FLAGS_player_threads; ++i) {
+      player_threads[i].join();
+    }
+    dqn.Snapshot();
+    return 0;
+  }
+
+  HFOEnvironment hfo = CreateHFOEnvironment(port);
   int last_eval_iter = 0;
   int last_snapshot_iter = 0;
   int episode = 0;
