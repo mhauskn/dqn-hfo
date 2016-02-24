@@ -112,7 +112,6 @@ int FindGreatestIter(const std::string& regexp) {
   }
   return max_iter;
 }
-
 void FindLatestSnapshot(const std::string& snapshot_prefix,
                         std::string& actor_snapshot,
                         std::string& critic_snapshot,
@@ -340,6 +339,16 @@ void EuclideanLossLayer(caffe::NetParameter& net_param,
   caffe::LayerParameter& layer = *net_param.add_layer();
   PopulateLayer(layer, name, "EuclideanLoss", bottoms, tops, include_phase);
 }
+void BatchNormLayer(caffe::NetParameter& net_param,
+                    const std::string& name,
+                    const std::vector<std::string>& bottoms,
+                    const std::vector<std::string>& tops,
+                    const boost::optional<caffe::Phase>& include_phase) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "BatchNorm", bottoms, tops, include_phase);
+  caffe::BatchNormParameter* param = layer.mutable_batch_norm_param();
+}
+
 caffe::NetParameter CreateActorNet(int state_size) {
   caffe::NetParameter np;
   np.set_name("Actor");
@@ -348,12 +357,16 @@ caffe::NetParameter CreateActorNet(int state_size) {
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
   SilenceLayer(np, "silence", {"dummy1"}, {}, boost::none);
   IPLayer(np, "ip1_layer", {states_blob_name}, {"ip1"}, boost::none, 1024);
+  // BatchNormLayer(np, "bn1_layer", {"ip1"}, {"ip1"}, boost::none);
   ReluLayer(np, "ip1_relu_layer", {"ip1"}, {"ip1"}, boost::none);
   IPLayer(np, "ip2_layer", {"ip1"}, {"ip2"}, boost::none, 512);
+  // BatchNormLayer(np, "bn2_layer", {"ip2"}, {"ip2"}, boost::none);
   ReluLayer(np, "ip2_relu_layer", {"ip2"}, {"ip2"}, boost::none);
   IPLayer(np, "ip3_layer", {"ip2"}, {"ip3"}, boost::none, 256);
+  // BatchNormLayer(np, "bn3_layer", {"ip3"}, {"ip3"}, boost::none);
   ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
   IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
+  // BatchNormLayer(np, "bn4_layer", {"ip4"}, {"ip4"}, boost::none);
   ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
   IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
   IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
@@ -378,12 +391,16 @@ caffe::NetParameter CreateCriticNet(int state_size) {
               {states_blob_name,actions_blob_name,action_params_blob_name},
               {"state_actions"}, boost::none, 2);
   IPLayer(np, "ip1_layer", {"state_actions"}, {"ip1"}, boost::none, 1024);
+  // BatchNormLayer(np, "bn1_layer", {"ip1"}, {"ip1"}, boost::none);
   ReluLayer(np, "ip1_relu_layer", {"ip1"}, {"ip1"}, boost::none);
   IPLayer(np, "ip2_layer", {"ip1"}, {"ip2"}, boost::none, 512);
+  // BatchNormLayer(np, "bn2_layer", {"ip2"}, {"ip2"}, boost::none);
   ReluLayer(np, "ip2_relu_layer", {"ip2"}, {"ip2"}, boost::none);
   IPLayer(np, "ip3_layer", {"ip2"}, {"ip3"}, boost::none, 256);
+  // BatchNormLayer(np, "bn3_layer", {"ip3"}, {"ip3"}, boost::none);
   ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
   IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
+  // BatchNormLayer(np, "bn4_layer", {"ip4"}, {"ip4"}, boost::none);
   ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
   IPLayer(np, q_values_layer_name, {"ip4"}, {q_values_blob_name}, boost::none, 1);
   EuclideanLossLayer(np, "loss", {q_values_blob_name, targets_blob_name},
@@ -416,6 +433,8 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
   }
   Initialize();
 }
+
+DQN::~DQN() {}
 
 void DQN::Benchmark(int iterations) {
   LOG(INFO) << "*** Benchmark begins ***";

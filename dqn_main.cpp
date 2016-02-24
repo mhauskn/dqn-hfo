@@ -35,7 +35,7 @@ DEFINE_double(actor_lr, .00001, "Solver learning rate.");
 DEFINE_double(critic_lr, .001, "Solver learning rate.");
 DEFINE_double(clip_grad, 10, "Clip gradients.");
 DEFINE_string(lr_policy, "fixed", "LR Policy.");
-DEFINE_int32(max_iter, 2000000, "Custom max iter.");
+DEFINE_int32(max_iter, 10000000, "Custom max iter.");
 // Epsilon-Greedy Args
 DEFINE_int32(explore, 10000, "Iterations for epsilon to reach given value.");
 DEFINE_double(epsilon, .1, "Value of epsilon after explore iterations.");
@@ -63,7 +63,7 @@ double CalculateEpsilon(const int iter) {
 std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
                                       const double epsilon,
                                       const bool update) {
-  std::vector<dqn::Transition> exp;
+  // std::vector<dqn::Transition> exp;
   HFOGameState game(hfo);
   hfo.act(DASH, 0, 0);
   std::deque<dqn::StateDataSp> past_states;
@@ -88,7 +88,7 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
       VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
       Action action = dqn::GetAction(actor_output);
       VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
-              << " Action: " << hfo.ActionToString(action);
+              << " Action: " << hfo::ActionToString(action.action);
       hfo.act(action.action, action.arg1, action.arg2);
       status_t status = hfo.step();
       game.update(current_state, status);
@@ -102,15 +102,15 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
         const auto transition = (game.status == IN_GAME) ?
             dqn::Transition(input_states, actor_output, reward, next_state_sp):
             dqn::Transition(input_states, actor_output, reward, boost::none);
-        exp.push_back(transition);
-        // dqn.AddTransition(transition);
-        // dqn.Update();
+        // exp.push_back(transition);
+        dqn.AddTransition(transition);
+        dqn.Update();
       }
     }
   }
-  if (update) {
-    dqn.AddTransitions(exp);
-  }
+  // if (update) {
+  //   dqn.AddTransitions(exp);
+  // }
   return std::make_pair(game.total_reward, game.steps);
 }
 

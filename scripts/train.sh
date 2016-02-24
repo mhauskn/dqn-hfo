@@ -2,24 +2,32 @@
 
 # set -e
 
-threads="1 3 6 9"
-MAX_ITER=2000000
-for t in $threads;
-do
-    JOB="threads$t"
-    SAVE="state/$JOB"
-    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -memory_snapshot=state/new_baseline1_iter_130000.replaymemory -max_iter=$MAX_ITER -mt -player_threads=$t`
-    ACTIVE="~/public_html/exp_vis/active/"$JOB
-    VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
-    SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
-    FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
-    EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
-    nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
-done
+# 2-23-16 Single threaded learning with new HFO
+JOB="st"
+SAVE="state/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -memory_threshold=10000`
+ACTIVE="~/public_html/exp_vis/active/"$JOB
+VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 
-# JOB="load_from_replaymem"
-# SAVE="state/$JOB"
-# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -memory_snapshot=state/new_baseline1_iter_130000.replaymemory`
+# 2-23-16 Batch Normalization Jobs
+# threads="1 3 6 9"
+# MAX_ITER=2000000
+# for t in $threads;
+# do
+#     JOB="bn_threads$t"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -memory_snapshot=state/new_baseline1_iter_130000.replaymemory -max_iter=$MAX_ITER -mt -player_threads=$t`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
 
 # ACTOR_LRS=".00001 .00003 .000003"
 # CRITIC_LRS=".001 .003 .0003"

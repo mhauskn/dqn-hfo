@@ -4,9 +4,15 @@
 #include <HFO.hpp>
 #include <random>
 
+struct Action {
+  hfo::action_t action;
+  float arg1;
+  float arg2;
+};
+
 int NumStateFeatures();
-hfo::HFOEnvironment CreateHFOEnvironment(int port);
-hfo::Action GetRandomHFOAction(std::mt19937& random_engine);
+hfo::HFOEnvironment CreateHFOEnvironment(int port=6000, int unum=11);
+Action GetRandomHFOAction(std::mt19937& random_engine);
 
 class HFOGameState {
  public:

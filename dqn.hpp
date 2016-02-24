@@ -11,6 +11,7 @@
 #include <boost/functional/hash.hpp>
 #include <boost/optional.hpp>
 #include <mutex>
+#include "hfo_game.hpp"
 
 namespace dqn {
 
@@ -57,6 +58,7 @@ public:
   DQN(caffe::SolverParameter& actor_solver_param,
       caffe::SolverParameter& critic_solver_param,
       std::string save_path, int state_size);
+  ~DQN();
 
   // Benchmark the speed of updates
   void Benchmark(int iterations=1000);
@@ -186,7 +188,7 @@ caffe::NetParameter CreateCriticNet(int state_size);
 /**
  * Converts an ActorOutput into an action
  */
-hfo::Action GetAction(const ActorOutput& actor_output);
+Action GetAction(const ActorOutput& actor_output);
 
 /**
  * Returns a vector of filenames matching a given regular expression.
