@@ -28,9 +28,6 @@ DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, false, "Snapshot the replay memory along with the network.");
-DEFINE_bool(advantage_update, false, "Use advantage learning.");
-DEFINE_bool(max_advantage_update, false, "Take a max during advantage learning.");
-DEFINE_double(alpha, .6, "Advantage learning gain");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -810,23 +807,6 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       next_states_batch.push_back(next_states);
     }
   }
-  std::vector<float> advantage(kMinibatchSize, 0.0f);
-  if (FLAGS_advantage_update) {
-    // Q(s,a) - Q-Values for the actions taken in the reply memory
-    const std::vector<float> q_s_a =
-        CriticForward(*critic_target_net_, states_batch, actions_batch);
-    // Q(s,a*) - Q-values for the actions the actor would currently take
-    const std::vector<float> q_s_aPrime =
-        CriticForwardThroughActor(
-            *critic_target_net_, *actor_target_net_, states_batch);
-    for (int n = 0; n < kMinibatchSize; ++n) {
-      if (FLAGS_max_advantage_update) {
-        advantage[n] = std::max(0.f, q_s_a[n] - q_s_aPrime[n]);
-      } else {
-        advantage[n] = q_s_a[n] - q_s_aPrime[n];
-      }
-    }
-  }
   // Generate targets using the target nets
   const std::vector<float> target_q_values =
       CriticForwardThroughActor(
@@ -835,9 +815,6 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   for (int n = 0; n < kMinibatchSize; ++n) {
     float target = terminal[n] ? rewards_batch[n] :
         rewards_batch[n] + gamma_ * target_q_values[target_value_idx++];
-    if (FLAGS_advantage_update) {
-      target -= FLAGS_alpha * advantage[n];
-    }
     CHECK(std::isfinite(target)) << "Target not finite!";
     target_input[target_blob->offset(n,0,0,0)] = target;
   }

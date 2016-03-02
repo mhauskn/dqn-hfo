@@ -2,11 +2,11 @@
 
 # set -e
 
-# 2-25-16 Again test update ratio. Hopefully no disk crashes this time...
+# 3-1-16 Testing DDQN update
 values=".05 .1 .5"
 for v in $values;
 do
-    JOB="UpdateRatio$v"
+    JOB="DDQN_UpdateRatio$v"
     SAVE="state/$JOB"
     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -update_ratio=$v`
     ACTIVE="~/public_html/exp_vis/active/"$JOB
@@ -16,6 +16,21 @@ do
     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 done
+
+# 2-25-16 Again test update ratio. Hopefully no disk crashes this time...
+# values=".05 .1 .5"
+# for v in $values;
+# do
+#     JOB="UpdateRatio$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -update_ratio=$v`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
 
 # 2-24-16 Testing different values of update ratio
 # values=".1 .5 1 2"
