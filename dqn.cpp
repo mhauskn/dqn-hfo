@@ -20,13 +20,14 @@ using namespace hfo;
 
 DEFINE_int32(seed, 0, "Seed the RNG. Default: time");
 DEFINE_double(tau, .001, "Step size for soft updates.");
+DEFINE_int32(soft_update_freq, 1, "Do SoftUpdateNet this frequently");
 DEFINE_double(gamma, .99, "Discount factor of future rewards (0,1]");
 DEFINE_int32(memory, 500000, "Capacity of replay memory");
 DEFINE_int32(memory_threshold, 1000, "Number of transitions required to start learning");
 DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
-DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
+DEFINE_bool(snapshot_memory, false, "Snapshot the replay memory along with the network.");
 DEFINE_bool(advantage_update, false, "Use advantage learning.");
 DEFINE_bool(max_advantage_update, false, "Take a max during advantage learning.");
 DEFINE_double(alpha, .6, "Advantage learning gain");
@@ -691,7 +692,6 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   const auto action_params_blob = actor.blob_by_name(action_params_blob_name);
   for (int n = 0; n < states_batch.size(); ++n) {
     ActorOutput actor_output;
-    // TODO: Optimize these copies
     for (int c = 0; c < kActionSize; ++c) {
       actor_output[c] = actions_blob->data_at(n,c,0,0);
     }
@@ -907,8 +907,10 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   actor_solver_->ApplyUpdate();
   actor_solver_->set_iter(actor_solver_->iter() + 1);
   // Soft update the target networks
-  SoftUpdateNet(critic_net_, critic_target_net_, FLAGS_tau);
-  SoftUpdateNet(actor_net_, actor_target_net_, FLAGS_tau);
+  if (max_iter() % FLAGS_soft_update_freq == 0) {
+    SoftUpdateNet(critic_net_, critic_target_net_, FLAGS_tau);
+    SoftUpdateNet(actor_net_, actor_target_net_, FLAGS_tau);
+  }
   mtx.unlock();
   return std::make_pair(critic_loss, avg_q);
 }
@@ -977,6 +979,7 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
 }
 
 void DQN::SoftUpdateNet(NetSp& net_from, NetSp& net_to, float tau) {
+  // TODO: Test if learnable_params() is sufficient for soft update
   const auto& from_params = net_from->params();
   const auto& to_params = net_to->params();
   CHECK_EQ(from_params.size(), to_params.size());

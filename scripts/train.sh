@@ -2,16 +2,62 @@
 
 # set -e
 
+# 2-25-16 Again test update ratio. Hopefully no disk crashes this time...
+values=".05 .1 .5"
+for v in $values;
+do
+    JOB="UpdateRatio$v"
+    SAVE="state/$JOB"
+    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -update_ratio=$v`
+    ACTIVE="~/public_html/exp_vis/active/"$JOB
+    VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+    SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+    FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+    EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+    nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+done
+
+# 2-24-16 Testing different values of update ratio
+# values=".1 .5 1 2"
+# for v in $values;
+# do
+#     JOB="UpdateRatio$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -update_ratio=$v`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
+
+# 2-24-16 Testing soft_update_freq
+# values="1 10 100 1000"
+# for v in $values;
+# do
+#     TAU=$(echo $v*.001 | bc)
+#     JOB="SoftUpdateFreq$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -soft_update_freq=$v -tau=$TAU`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
+
 # 2-23-16 Single threaded learning with new HFO
-JOB="st"
-SAVE="state/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -memory_threshold=10000`
-ACTIVE="~/public_html/exp_vis/active/"$JOB
-VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
-SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
-FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
-EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
-nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# JOB="st"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -memory_threshold=10000`
+# ACTIVE="~/public_html/exp_vis/active/"$JOB
+# VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+# SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+# FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+# EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+# nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 
 # 2-23-16 Batch Normalization Jobs
 # threads="1 3 6 9"

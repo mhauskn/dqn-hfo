@@ -88,6 +88,7 @@ void HFOGameState::update(const std::vector<float>& current_state,
                           status_t current_status) {
   if (status == SERVER_DOWN) {
     LOG(FATAL) << "Server Down!";
+    exit(1);
   }
   status = current_status;
   if (status != IN_GAME) {

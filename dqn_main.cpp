@@ -48,6 +48,7 @@ DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
 DEFINE_bool(learn_online, true, "Update while playing. Otherwise just calls update.");
 DEFINE_bool(mt, false, "Multithreaded learning");
 DEFINE_int32(player_threads, 6, "Number of threads playing games");
+DEFINE_double(update_ratio, 0.1, "Ratio of new experiences to updates.");
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -63,9 +64,9 @@ double CalculateEpsilon(const int iter) {
 std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
                                       const double epsilon,
                                       const bool update) {
-  // std::vector<dqn::Transition> exp;
   HFOGameState game(hfo);
   hfo.act(DASH, 0, 0);
+  game.update(hfo.getState(), hfo.step());
   std::deque<dqn::StateDataSp> past_states;
   while (!game.episode_over) {
     const std::vector<float>& current_state = hfo.getState();
@@ -102,15 +103,10 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
         const auto transition = (game.status == IN_GAME) ?
             dqn::Transition(input_states, actor_output, reward, next_state_sp):
             dqn::Transition(input_states, actor_output, reward, boost::none);
-        // exp.push_back(transition);
         dqn.AddTransition(transition);
-        dqn.Update();
       }
     }
   }
-  // if (update) {
-  //   dqn.AddTransitions(exp);
-  // }
   return std::make_pair(game.total_reward, game.steps);
 }
 
@@ -330,13 +326,18 @@ int main(int argc, char** argv) {
     if (FLAGS_learn_online) {
       double epsilon = CalculateEpsilon(dqn.max_iter());
       std::pair<double,int> result = PlayOneEpisode(hfo, dqn, epsilon, true);
-      LOG(INFO) << "Episode " << episode << " score = " << result.first
-                << ", steps = " << result.second
-                << ", epsilon = " << epsilon
-                << ", actor_iter = " << dqn.actor_iter()
-                << ", critic_iter = " << dqn.critic_iter()
-                << ", replay_mem_size = " << dqn.memory_size();
+      int steps = result.second;
+      LOG(INFO) << "Episode " << episode << " score = " << result.first;
+                // << ", steps = " << steps
+                // << ", epsilon = " << epsilon;
+                // << ", actor_iter = " << dqn.actor_iter()
+                // << ", critic_iter = " << dqn.critic_iter()
+                // << ", replay_mem_size = " << dqn.memory_size();
       episode++;
+      int n_updates = int(steps * FLAGS_update_ratio);
+      for (int i=0; i<n_updates; ++i) {
+        dqn.Update();
+      }
     } else {
       dqn.Update();
     }
@@ -347,8 +348,8 @@ int main(int argc, char** argv) {
                   << ", actor_iter = " << dqn.actor_iter()
                   << ", critic_iter = " << dqn.critic_iter();
         best_score = avg_score;
-        std::string fname = save_path.native() + "_HiScore" + std::to_string(avg_score);
-        dqn.Snapshot(fname, false, false);
+        // std::string fname = save_path.native() + "_HiScore" + std::to_string(avg_score);
+        // dqn.Snapshot(fname, false, false);
       }
       last_eval_iter = dqn.actor_iter();
     }
