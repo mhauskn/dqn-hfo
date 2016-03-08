@@ -10,14 +10,30 @@ struct Action {
   float arg2;
 };
 
-int NumStateFeatures();
-hfo::HFOEnvironment CreateHFOEnvironment(int port=6000, int unum=11);
+const
+inline int NumStateFeatures(int offense_agents, int offense_npcs,
+                            int defense_agents, int defense_npcs) {
+  return 50 + 8 * (offense_agents + defense_npcs + offense_npcs + defense_agents);
+}
+
+// Starts the RCSSSERVER
+void StartHFOServer(int port, int offense_agents, int offense_npcs,
+                    int defense_agents, int defense_npcs);
+
+// Creates an interface for a single agent to connect to the server
+void ConnectToServer(hfo::HFOEnvironment& hfo_env, int port=6000, int unum=11);
+
+// Returns a random HFO Action
 Action GetRandomHFOAction(std::mt19937& random_engine);
 
 class HFOGameState {
  public:
   HFOGameState(hfo::HFOEnvironment& hfo);
   ~HFOGameState();
+  /**
+   * Acts, steps the HFOEnvironment, updates itself, and returns the reward
+   */
+  float step(Action& action);
   void update(const std::vector<float>& current_state,
               hfo::status_t current_status);
   float reward();

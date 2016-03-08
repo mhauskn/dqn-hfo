@@ -5,39 +5,42 @@
 #include <cmath>
 
 using namespace hfo;
-
-DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
-DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
-DEFINE_int32(defense_agents, 0, "Number of agents playing defense");
-DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 DEFINE_string(server_cmd, "./scripts/HFO --fullstate --frames-per-trial 500",
               "Command executed to start the HFO server.");
 DEFINE_string(config_dir, "/u/mhauskn/projects/HFO/bin/teams/base/config/formations-dt",
               "Directory containing HFO config files.");
 DEFINE_bool(gui, false, "Open a GUI window.");
 DEFINE_bool(log_game, false, "Log the HFO game.");
+DEFINE_string(server_addr, "localhost", "Address of rcssserver.");
+DEFINE_string(team_name, "base_left", "Name of team for agents.");
+DEFINE_bool(play_goalie, false, "Should the agent play goalie.");
+DEFINE_string(record_dir, "", "Directory to record states,actions,rewards.");
 
-int NumStateFeatures() {
-  return 50 + 8 * (FLAGS_offense_agents + FLAGS_defense_npcs +
-                   FLAGS_offense_npcs + FLAGS_defense_agents);
-}
-
-HFOEnvironment CreateHFOEnvironment(int port, int unum) {
+void StartHFOServer(int port, int offense_agents, int offense_npcs,
+                    int defense_agents, int defense_npcs) {
   std::string cmd = FLAGS_server_cmd + " --port " + std::to_string(port)
-      + " --offense-agents " + std::to_string(FLAGS_offense_agents)
-      + " --offense-npcs " + std::to_string(FLAGS_offense_npcs)
-      + " --defense-agents " + std::to_string(FLAGS_defense_agents)
-      + " --defense-npcs " + std::to_string(FLAGS_defense_npcs);
+      + " --offense-agents " + std::to_string(offense_agents)
+      + " --offense-npcs " + std::to_string(offense_npcs)
+      + " --defense-agents " + std::to_string(defense_agents)
+      + " --defense-npcs " + std::to_string(defense_npcs);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_log_game) { cmd += " --no-logging"; }
   cmd += " &";
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
   sleep(10);
-  HFOEnvironment hfo_env;
-  hfo_env.connectToServer(LOW_LEVEL_FEATURE_SET, FLAGS_config_dir, unum,
-                          port, "localhost", "base_left", false);
-  return hfo_env;
+}
+
+void ConnectToServer(hfo::HFOEnvironment& hfo_env, int port, int unum) {
+  hfo_env.connectToServer(LOW_LEVEL_FEATURE_SET,
+                          FLAGS_config_dir,
+                          unum,
+                          port,
+                          FLAGS_server_addr,
+                          FLAGS_team_name,
+                          FLAGS_play_goalie,
+                          FLAGS_record_dir);
+  sleep(5);
 }
 
 Action GetRandomHFOAction(std::mt19937& random_engine) {
