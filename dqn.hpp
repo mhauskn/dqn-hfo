@@ -86,6 +86,9 @@ public:
   std::vector<ActorOutput> SelectActions(const std::vector<InputStates>& states_batch,
                                          double epsilon);
 
+  // Converts an ActorOutput into an action by samping over discrete actions
+  Action SampleAction(const ActorOutput& actor_output);
+
   // Evaluate a state-action, returning the q-value.
   float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
 
@@ -111,9 +114,6 @@ public:
   int critic_iter() const { return critic_solver_->iter(); }
   int actor_iter() const { return actor_solver_->iter(); }
   int state_size() const { return state_size_; }
-
-  void lock_mutex() { mtx.lock(); }
-  void unlock_mutex() { mtx.unlock(); }
 
 protected:
   // Initialize DQN. Called by the constructor
@@ -179,14 +179,13 @@ protected:
   std::string save_path_;
   const int state_size_; // Number of state features
   const int state_input_data_size_;
-  std::mutex mtx;
 };
 
 caffe::NetParameter CreateActorNet(int state_size);
 caffe::NetParameter CreateCriticNet(int state_size);
 
 /**
- * Converts an ActorOutput into an action
+ * Converts an ActorOutput into an action by maxing over discrete actions
  */
 Action GetAction(const ActorOutput& actor_output);
 

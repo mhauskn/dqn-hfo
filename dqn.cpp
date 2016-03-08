@@ -168,6 +168,22 @@ int GetParamOffset(const action_t action, const int arg_num = 0) {
   }
 }
 
+Action DQN::SampleAction(const ActorOutput& actor_output) {
+  float dash_prob = std::max(0., actor_output[DASH] + 1.0);
+  float turn_prob = std::max(0., actor_output[TURN] + 1.0);
+  float tackle_prob = 0; // Remove tackle action
+  float kick_prob = std::max(0., actor_output[KICK] + 1.0);
+  std::discrete_distribution<int> dist { dash_prob, turn_prob, tackle_prob, kick_prob };
+  action_t max_act = (action_t) dist(random_engine);
+  Action action;
+  action.action = max_act;
+  int arg1_offset = GetParamOffset(max_act, 0); CHECK_GE(arg1_offset, 0);
+  action.arg1 = actor_output[kActionSize + arg1_offset];
+  int arg2_offset = GetParamOffset(max_act, 1);
+  action.arg2 = arg2_offset < 0 ? 0 : actor_output[kActionSize + arg2_offset];
+  return action;
+}
+
 Action GetAction(const ActorOutput& actor_output) {
   ActorOutput copy(actor_output); // TODO: Remove hack
   copy[TACKLE] = -99999; // Remove tackle action.
@@ -420,7 +436,7 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         last_snapshot_iter_(0),
         save_path_(save_path),
         state_size_(state_size),
-  state_input_data_size_(kMinibatchSize * state_size * kStateInputCount) {
+        state_input_data_size_(kMinibatchSize * state_size * kStateInputCount) {
   if (FLAGS_seed <= 0) {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     LOG(INFO) << "Seeding RNG to time (seed = " << seed << ")";
@@ -533,7 +549,6 @@ void DQN::Snapshot() {
 
 void DQN::Snapshot(const std::string& snapshot_prefix,
                    bool remove_old, bool snapshot_memory) {
-  mtx.lock();
   using namespace boost::filesystem;
   actor_solver_->Snapshot();
   critic_solver_->Snapshot();
@@ -566,7 +581,6 @@ void DQN::Snapshot(const std::string& snapshot_prefix,
     RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter - 1);
   }
   LOG(INFO) << "Snapshotting Finished!";
-  mtx.unlock();
 }
 
 void DQN::Initialize() {
@@ -701,22 +715,18 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
 }
 
 void DQN::AddTransition(const Transition& transition) {
-  mtx.lock();
   if (replay_memory_.size() == replay_memory_capacity_) {
     replay_memory_.pop_front();
   }
   replay_memory_.push_back(transition);
-  mtx.unlock();
 }
 
 void DQN::AddTransitions(const std::vector<Transition>& transitions) {
-  mtx.lock();
   while (replay_memory_.size() + transitions.size() >= replay_memory_capacity_) {
     replay_memory_.pop_front();
   }
   std::deque<Transition>::iterator it = replay_memory_.end();
   replay_memory_.insert(it, transitions.begin(), transitions.end());
-  mtx.unlock();
 }
 
 void DQN::Update() {
@@ -749,7 +759,6 @@ void DQN::Update() {
 }
 
 std::pair<float,float> DQN::UpdateActorCritic() {
-  mtx.lock();
   CHECK(critic_net_->has_blob(states_blob_name));
   CHECK(critic_net_->has_blob(actions_blob_name));
   CHECK(critic_net_->has_blob(action_params_blob_name));
@@ -888,7 +897,6 @@ std::pair<float,float> DQN::UpdateActorCritic() {
     SoftUpdateNet(critic_net_, critic_target_net_, FLAGS_tau);
     SoftUpdateNet(actor_net_, actor_target_net_, FLAGS_tau);
   }
-  mtx.unlock();
   return std::make_pair(critic_loss, avg_q);
 }
 
