@@ -2,13 +2,24 @@
 
 # set -e
 
-# 3-2-16 Testing Samping of actions rather than max
-values=".05 .1"
+# 3-8-16 2v0 testing
+# JOB="dualagent"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2`
+# ACTIVE="~/public_html/exp_vis/active/"$JOB
+# VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+# SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+# FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+# EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+# nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+
+# 3-8-16 Regression testing on single agent learning
+values="1 2"
 for v in $values;
 do
-    JOB="ActionSampling_UpdateRatio$v"
+    JOB="sanity$v"
     SAVE="state/$JOB"
-    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -update_ratio=$v -sample_actions`
+    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE`
     ACTIVE="~/public_html/exp_vis/active/"$JOB
     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
@@ -16,6 +27,21 @@ do
     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 done
+
+# 3-2-16 Testing Samping of actions rather than max
+# values=".05 .1"
+# for v in $values;
+# do
+#     JOB="ActionSampling_UpdateRatio$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -update_ratio=$v -sample_actions`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
 
 # 3-2-16 Testing Offense against a goalie
 # values="1 2"
