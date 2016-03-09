@@ -114,6 +114,7 @@ public:
   int critic_iter() const { return critic_solver_->iter(); }
   int actor_iter() const { return actor_solver_->iter(); }
   int state_size() const { return state_size_; }
+  const std::string& save_path() const { return save_path_; }
 
 protected:
   // Initialize DQN. Called by the constructor
@@ -193,6 +194,9 @@ Action GetAction(const ActorOutput& actor_output);
  * Returns a vector of filenames matching a given regular expression.
  */
 std::vector<std::string> FilesMatchingRegexp(const std::string& regexp);
+
+// Removes all files matching a given regular expression
+void RemoveFilesMatchingRegexp(const std::string& regexp);
 
 /**
  * Removes snapshots matching regexp that have an iteration less than

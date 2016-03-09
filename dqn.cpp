@@ -88,6 +88,14 @@ int ParseScoreFromSnapshot(const std::string& snapshot) {
   return std::stoi(snapshot.substr(start+8, end-start-1));
 }
 
+void RemoveFilesMatchingRegexp(const std::string& regexp) {
+  for (const std::string& f : FilesMatchingRegexp(regexp)) {
+    LOG(INFO) << "Removing " << f;
+    CHECK(boost::filesystem::is_regular_file(f));
+    boost::filesystem::remove(f);
+  }
+}
+
 void RemoveSnapshots(const std::string& regexp, int min_iter) {
   for (const std::string& f : FilesMatchingRegexp(regexp)) {
     int iter = ParseIterFromSnapshot(f);
