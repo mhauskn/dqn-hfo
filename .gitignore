@@ -26,3 +26,13 @@
 *.exe
 *.out
 *.app
+
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+dqn
+log/
+matplotlibrc
+scripts/HFO
+state/
