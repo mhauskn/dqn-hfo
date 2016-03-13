@@ -433,7 +433,7 @@ caffe::NetParameter CreateCriticNet(int state_size) {
 
 DQN::DQN(caffe::SolverParameter& actor_solver_param,
          caffe::SolverParameter& critic_solver_param,
-         std::string save_path, int state_size) :
+         std::string save_path, int state_size, int tid, int unum) :
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
@@ -444,7 +444,9 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         last_snapshot_iter_(0),
         save_path_(save_path),
         state_size_(state_size),
-        state_input_data_size_(kMinibatchSize * state_size * kStateInputCount) {
+        state_input_data_size_(kMinibatchSize * state_size * kStateInputCount),
+        tid_(tid),
+        unum_(unum) {
   if (FLAGS_seed <= 0) {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     LOG(INFO) << "Seeding RNG to time (seed = " << seed << ")";
@@ -745,13 +747,13 @@ void DQN::Update() {
   float critic_loss = res.first;
   float avg_q = res.second;
   if (critic_iter() % FLAGS_loss_display_iter == 0) {
-    LOG(INFO) << "Critic Iteration " << critic_iter()
+    LOG(INFO) << "[Agent" << tid_ << "] Critic Iteration " << critic_iter()
               << ", loss = " << smoothed_critic_loss_;
     smoothed_critic_loss_ = 0;
   }
   smoothed_critic_loss_ += critic_loss / float(FLAGS_loss_display_iter);
   if (actor_iter() % FLAGS_loss_display_iter == 0) {
-    LOG(INFO) << "Actor Iteration " << actor_iter()
+    LOG(INFO) << "[Agent" << tid_ << "] Actor Iteration " << actor_iter()
               << ", avg_q_value = " << smoothed_actor_loss_;
     smoothed_actor_loss_ = 0;
   }

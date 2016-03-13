@@ -57,7 +57,7 @@ class DQN {
 public:
   DQN(caffe::SolverParameter& actor_solver_param,
       caffe::SolverParameter& critic_solver_param,
-      std::string save_path, int state_size);
+      std::string save_path, int state_size, int tid, int unum);
   ~DQN();
 
   // Benchmark the speed of updates
@@ -115,6 +115,7 @@ public:
   int actor_iter() const { return actor_solver_->iter(); }
   int state_size() const { return state_size_; }
   const std::string& save_path() const { return save_path_; }
+  int unum() const { return unum_; }
 
 protected:
   // Initialize DQN. Called by the constructor
@@ -180,6 +181,8 @@ protected:
   std::string save_path_;
   const int state_size_; // Number of state features
   const int state_input_data_size_;
+  int tid_;
+  int unum_;
 };
 
 caffe::NetParameter CreateActorNet(int state_size);

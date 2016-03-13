@@ -52,7 +52,6 @@ DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
 DEFINE_int32(defense_agents, 0, "Number of agents playing defense");
 DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 
-
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
     return 1.0 - (1.0 - FLAGS_epsilon) * (static_cast<double>(iter) / FLAGS_explore);
@@ -61,15 +60,28 @@ double CalculateEpsilon(const int iter) {
   }
 }
 
+std::string GetArg(std::string input, int indx) {
+  std::istringstream ss(input);
+  std::string token;
+  int i = 0;
+  while(std::getline(ss, token, ',')) {
+    if (i++ == indx) {
+      return token;
+    }
+  }
+  return "";
+}
+
 /**
  * Play one episode and return the total score and number of steps
  */
-std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
-                                      const double epsilon,
-                                      const bool update) {
-  HFOGameState game(hfo);
+std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
+                                                 dqn::DQN& dqn,
+                                                 const double epsilon,
+                                                 const bool update) {
+  HFOGameState game(dqn.unum());
   hfo.act(DASH, 0, 0);
-  game.update(hfo.getState(), hfo.step());
+  game.update(hfo);
   std::deque<dqn::StateDataSp> past_states;
   while (!game.episode_over) {
     const std::vector<float>& current_state = hfo.getState();
@@ -92,8 +104,7 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
       VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
               << " Action: " << hfo::ActionToString(action.action);
       hfo.act(action.action, action.arg1, action.arg2);
-      status_t status = hfo.step();
-      game.update(current_state, status);
+      game.update(hfo);
       float reward = game.reward();
       if (update) {
         const std::vector<float>& next_state = hfo.getState();
@@ -109,7 +120,7 @@ std::pair<double, int> PlayOneEpisode(HFOEnvironment& hfo, dqn::DQN& dqn,
     }
   }
   LOG(INFO) << "Status " << game.status;
-  return std::make_pair(game.total_reward, game.steps);
+  return std::make_tuple(game.total_reward, game.steps, game.status);
 }
 
 template <class T>
@@ -127,35 +138,35 @@ std::pair<double,double> get_avg_std(std::vector<T> data) {
   return std::make_pair(avg, std);
 }
 
-/**
- * Evaluate the current player
- */
-double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn) {
+
+double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   LOG(INFO) << "Evaluating for " << FLAGS_repeat_games
             << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon;
   std::vector<double> scores;
   std::vector<int> steps;
   std::vector<int> successful_trial_steps;
+  int goals = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    std::pair<double,int> result = PlayOneEpisode(
-        hfo, dqn, FLAGS_evaluate_with_epsilon, false);
-    scores.push_back(result.first);
-    steps.push_back(result.second);
-    if (result.first > 0) {
-      successful_trial_steps.push_back(result.second);
+    auto result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
+    scores.push_back(std::get<0>(result));
+    steps.push_back(std::get<1>(result));
+    if (std::get<2>(result) == GOAL) {
+      goals++;
+      successful_trial_steps.push_back(std::get<1>(result));
     }
   }
   std::pair<double, double> score_dist = get_avg_std(scores);
   std::pair<double, double> steps_dist = get_avg_std(steps);
   std::pair<double, double> succ_steps_dist = get_avg_std(successful_trial_steps);
-  LOG(INFO) << "Evaluation: "
-            << " actor_iter = " << dqn.actor_iter()
-            << ", avg_score = " << score_dist.first
-            << ", score_std = " << score_dist.second
+  LOG(INFO) << "[Agent" << tid << "] Evaluation: "
+            << "actor_iter = " << dqn.actor_iter()
+            << ", avg_reward = " << score_dist.first
+            << ", reward_std = " << score_dist.second
             << ", avg_steps = " << steps_dist.first
             << ", steps_std = " << steps_dist.second
-            << ", success_avg_steps = " << succ_steps_dist.first
-            << ", success_steps_std = " << succ_steps_dist.second;
+            << ", success_steps = " << succ_steps_dist.first
+            << ", success_std = " << succ_steps_dist.second
+            << ", goal_perc = " << (goals / float(FLAGS_repeat_games));
   return score_dist.first;
 }
 
@@ -228,27 +239,26 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   critic_solver_param.set_clip_gradients(FLAGS_clip_grad);
 
   dqn::DQN* dqn = new dqn::DQN(actor_solver_param, critic_solver_param,
-                                 save_prefix, num_features);
-  // TODO: Agent-specific loading of actor/critic/memory
+                               save_prefix, num_features, tid, unum);
   // Load actor/critic/memory
-  if (!FLAGS_actor_snapshot.empty()) {
-    dqn->RestoreActorSolver(FLAGS_actor_snapshot);
-  } else if (!FLAGS_actor_weights.empty()) {
-    dqn->LoadActorWeights(FLAGS_actor_weights);
+  if (!GetArg(FLAGS_actor_snapshot, tid).empty()) {
+    dqn->RestoreActorSolver(GetArg(FLAGS_actor_snapshot, tid));
+  } else if (!GetArg(FLAGS_actor_weights, tid).empty()) {
+    dqn->LoadActorWeights(GetArg(FLAGS_actor_weights, tid));
   }
-  if (!FLAGS_critic_snapshot.empty()) {
-    dqn->RestoreCriticSolver(FLAGS_critic_snapshot);
-  } else if (!FLAGS_critic_weights.empty()) {
-    dqn->LoadCriticWeights(FLAGS_critic_weights);
+  if (!GetArg(FLAGS_critic_snapshot, tid).empty()) {
+    dqn->RestoreCriticSolver(GetArg(FLAGS_critic_snapshot, tid));
+  } else if (!GetArg(FLAGS_critic_weights, tid).empty()) {
+    dqn->LoadCriticWeights(GetArg(FLAGS_critic_weights, 0));
   }
-  if (!FLAGS_memory_snapshot.empty()) {
-    dqn->LoadReplayMemory(FLAGS_memory_snapshot);
+  if (!GetArg(FLAGS_memory_snapshot, tid).empty()) {
+    dqn->LoadReplayMemory(GetArg(FLAGS_memory_snapshot, tid));
   }
 
   HFOEnvironment env;
   ConnectToServer(env, port, unum);
   if (FLAGS_evaluate) {
-    Evaluate(env, *dqn);
+    Evaluate(env, *dqn, tid);
     return;
   }
   if (FLAGS_benchmark) {
@@ -260,21 +270,16 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   double best_score = std::numeric_limits<double>::min();
   for (int episode = 0; dqn->max_iter() < FLAGS_max_iter; ++episode) {
     double epsilon = CalculateEpsilon(dqn->max_iter());
-    std::pair<double,int> result = PlayOneEpisode(env, *dqn, epsilon, true);
-    int steps = result.second;
+    auto result = PlayOneEpisode(env, *dqn, epsilon, true);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
-              << " score = " << result.first;
-              // << ", steps = " << result.second
-              // << ", epsilon = " << epsilon
-              // << ", actor_iter = " << dqn->actor_iter()
-              // << ", critic_iter = " << dqn->critic_iter()
-              // << ", replay_mem_size = " << dqn->memory_size();
+              << " reward = " << std::get<0>(result);
+    int steps = std::get<1>(result);
     int n_updates = int(steps * FLAGS_update_ratio);
     for (int i=0; i<n_updates; ++i) {
       dqn->Update();
     }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
-      double avg_score = Evaluate(env, *dqn);
+      double avg_score = Evaluate(env, *dqn, tid);
       if (avg_score > best_score) {
         LOG(INFO) << "[Agent " << tid << "] New High Score: " << avg_score
                   << ", actor_iter = " << dqn->actor_iter()
@@ -288,7 +293,6 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
     }
   }
   dqn->Snapshot();
-  Evaluate(env, *dqn);
   delete dqn;
 }
 
