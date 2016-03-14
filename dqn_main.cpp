@@ -175,6 +175,7 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   std::pair<double, double> score_dist = get_avg_std(scores);
   std::pair<double, double> steps_dist = get_avg_std(steps);
   std::pair<double, double> succ_steps_dist = get_avg_std(successful_trial_steps);
+  float goal_percent = goals / float(FLAGS_repeat_games);
   LOG(INFO) << "[Agent" << tid << "] Evaluation: "
             << "actor_iter = " << dqn.actor_iter()
             << ", avg_reward = " << score_dist.first
@@ -183,8 +184,8 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
             << ", steps_std = " << steps_dist.second
             << ", success_steps = " << succ_steps_dist.first
             << ", success_std = " << succ_steps_dist.second
-            << ", goal_perc = " << (goals / float(FLAGS_repeat_games));
-  return score_dist.first;
+            << ", goal_perc = " << goal_percent;
+  return goal_percent;
 }
 
 void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
