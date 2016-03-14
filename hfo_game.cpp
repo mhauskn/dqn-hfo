@@ -130,6 +130,7 @@ void HFOGameState::update(HFOEnvironment& hfo) {
     ball_dist_goal_delta = 0;
   }
   player_on_ball = hfo.playerOnBall();
+  VLOG(1) << "Player On Ball: " << player_on_ball.unum;
   steps++;
 }
 
@@ -147,7 +148,10 @@ float HFOGameState::reward() {
 // Reward for moving to ball and getting kickable. Ends episode once
 // kickable is attained.
 float HFOGameState::move_to_ball_reward() {
-  float reward = ball_prox_delta;
+  float reward = 0;
+  if (player_on_ball.unum < 0) {
+    reward += ball_prox_delta;
+  }
   if (kickable_delta >= 1 && !got_kickable_reward) {
     reward += 1.0;
     got_kickable_reward = true;
@@ -157,22 +161,26 @@ float HFOGameState::move_to_ball_reward() {
 
 // Reward for kicking ball towards the goal
 float HFOGameState::kick_to_goal_reward() {
-  return -ball_dist_goal_delta;
+  if (player_on_ball.unum == our_unum) {
+    return -ball_dist_goal_delta;
+  } else if (got_kickable_reward) { // We have passed to teammate
+    return 0.2 * -ball_dist_goal_delta;
+  }
+  return 0;
 }
 
 float HFOGameState::EOT_reward() {
   if (status == GOAL) {
     CHECK(player_on_ball.side == LEFT) << "Goal scored by defense?";
-    return 5;
     if (player_on_ball.unum == our_unum) {
       VLOG(1) << "We Scored!";
       return 5;
     } else {
       VLOG(1) << "Teammate Scored!";
-      return 3;
+      return 1;
     }
   } else if (status == CAPTURED_BY_DEFENSE) {
-    return 1;
+    return 0;
   }
   return 0;
 }
