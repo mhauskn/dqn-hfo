@@ -28,6 +28,7 @@ DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, false, "Snapshot the replay memory along with the network.");
+DEFINE_bool(use_skills, false, "Uses a hierarchy of skills");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -370,6 +371,31 @@ void BatchNormLayer(caffe::NetParameter& net_param,
   PopulateLayer(layer, name, "BatchNorm", bottoms, tops, include_phase);
   caffe::BatchNormParameter* param = layer.mutable_batch_norm_param();
 }
+void SoftmaxLayer(caffe::NetParameter& net_param,
+                  const std::string& name,
+                  const std::vector<std::string>& bottoms,
+                  const std::vector<std::string>& tops,
+                  const boost::optional<caffe::Phase>& include_phase,
+                  const int axis) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "Softmax", bottoms, tops, include_phase);
+  caffe::SoftmaxParameter* param = layer.mutable_softmax_param();
+  param->set_axis(axis);
+}
+void TileLayer(caffe::NetParameter& net_param,
+               const std::string& name,
+               const std::vector<std::string>& bottoms,
+               const std::vector<std::string>& tops,
+               const boost::optional<caffe::Phase>& include_phase,
+               const int axis,
+               const int tiles) {
+  caffe::LayerParameter& layer = *net_param.add_layer();
+  PopulateLayer(layer, name, "Tile", bottoms, tops, include_phase);
+  caffe::TileParameter* param = layer.mutable_tile_param();
+  param->set_axis(axis);
+  param->set_tiles(tiles);
+}
+
 
 std::string Tower(caffe::NetParameter& np,
                   const std::string& layer_prefix,
@@ -396,9 +422,39 @@ caffe::NetParameter CreateActorNet(int state_size) {
   MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
   SilenceLayer(np, "silence", {"dummy1"}, {}, boost::none);
-  std::string tower_top = Tower(np, "", states_blob_name, {1024, 512, 256, 128});
-  IPLayer(np, "action_layer", {tower_top}, {"actions"}, boost::none, 4);
-  IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none, 6);
+  if (FLAGS_use_skills) {
+    // Define two skills and a network for selecting between them
+    std::string sk1_tower = Tower(np, "sk1_", states_blob_name, {1024, 512, 256, 128});
+    IPLayer(np, "sk1_output_layer", {sk1_tower}, {"sk1_out"}, boost::none,
+            kActionSize + kActionParamSize);
+    std::string sk2_tower = Tower(np, "sk2_", states_blob_name, {1024, 512, 256, 128});
+    IPLayer(np, "sk2_output_layer", {sk2_tower}, {"sk2_out"}, boost::none,
+            kActionSize + kActionParamSize);
+    std::string beta_tower = Tower(np, "beta_", states_blob_name, {1024, 512, 256, 128});
+    IPLayer(np, "beta_logits_layers", {beta_tower}, {"beta_logits"}, boost::none, 2);
+    SoftmaxLayer(np, "beta_softmax_layer", {"beta_logits"}, {"beta_softmax"}, boost::none, 1);
+    SliceLayer(np, "beta_slice_layer", {"beta_softmax"}, {"sk1_gain", "sk2_gain"}, boost::none,
+               1, {1});
+    // Tile the gains for input into eltwise prod
+    TileLayer(np, "beta_sk0_tile", {"sk1_gain"}, {"sk1_tile"}, boost::none, 1,
+              kActionSize + kActionParamSize);
+    TileLayer(np, "beta_sk1_tile", {"sk2_gain"}, {"sk2_tile"}, boost::none, 1,
+              kActionSize + kActionParamSize);
+    // Eltwise Layers
+    EltwiseLayer(np, "eltwise_sk1_layer", {"sk1_out", "sk1_tile"}, {"sk1_weighted"},
+                 boost::none, caffe::EltwiseParameter_EltwiseOp_PROD);
+    EltwiseLayer(np, "eltwise_sk2_layer", {"sk2_out", "sk2_tile"}, {"sk2_weighted"},
+                 boost::none, caffe::EltwiseParameter_EltwiseOp_PROD);
+    EltwiseLayer(np, "eltwise_sum_layer", {"sk1_weighted", "sk2_weighted"}, {"weighted_output"},
+                 boost::none, caffe::EltwiseParameter_EltwiseOp_SUM);
+    // Slice into actions and params
+    SliceLayer(np, "action_slice_layer", {"weighted_output"},
+               {actions_blob_name, action_params_blob_name}, boost::none, 1, {kActionSize});
+  } else {
+    std::string tower_top = Tower(np, "", states_blob_name, {1024, 512, 256, 128});
+    IPLayer(np, "action_layer", {tower_top}, {"actions"}, boost::none, 4);
+    IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none, 6);
+  }
   return np;
 }
 
