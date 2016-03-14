@@ -952,7 +952,8 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   actor_actions_blob->ShareDiff(*critic_action_blob);
   actor_action_params_blob->ShareDiff(*critic_action_params_blob);
   DLOG(INFO) << " [Backwards] " << actor_net_->name();
-  actor_net_->BackwardFrom(GetLayerIndex(*actor_net_, "actionpara_layer"));
+  actor_net_->BackwardFrom(GetLayerIndex(
+      *actor_net_, FLAGS_use_skills ? "action_slice_layer" : "actionpara_layer"));
   actor_solver_->ApplyUpdate();
   actor_solver_->set_iter(actor_solver_->iter() + 1);
   // Soft update the target networks
