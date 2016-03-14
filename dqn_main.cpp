@@ -52,6 +52,10 @@ DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
 DEFINE_int32(defense_agents, 0, "Number of agents playing defense");
 DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 
+// Global Variables Shared Between Threads
+int UPDATES_TO_DO = -1; // How many updates to perform after each episode
+
+
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
     return 1.0 - (1.0 - FLAGS_epsilon) * (static_cast<double>(iter) / FLAGS_explore);
@@ -70,6 +74,16 @@ std::string GetArg(std::string input, int indx) {
     }
   }
   return "";
+}
+
+// Busy sleep while suggesting that other threads run for a small amount of time
+void little_sleep(std::chrono::microseconds us)
+{
+    auto start = std::chrono::high_resolution_clock::now();
+    auto end = start + us;
+    do {
+        std::this_thread::yield();
+    } while (std::chrono::high_resolution_clock::now() < end);
 }
 
 /**
@@ -140,7 +154,7 @@ std::pair<double,double> get_avg_std(std::vector<T> data) {
 
 
 double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
-  LOG(INFO) << "Evaluating for " << FLAGS_repeat_games
+  LOG(INFO) << "[Agent" << tid << "] Evaluating for " << FLAGS_repeat_games
             << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon;
   std::vector<double> scores;
   std::vector<int> steps;
@@ -148,11 +162,14 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   int goals = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
     auto result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
-    scores.push_back(std::get<0>(result));
-    steps.push_back(std::get<1>(result));
-    if (std::get<2>(result) == GOAL) {
+    double trial_reward = std::get<0>(result);
+    int trial_steps = std::get<1>(result);
+    status_t trial_status = std::get<2>(result);
+    scores.push_back(trial_reward);
+    steps.push_back(trial_steps);
+    if (trial_status == GOAL) {
       goals++;
-      successful_trial_steps.push_back(std::get<1>(result));
+      successful_trial_steps.push_back(trial_steps);
     }
   }
   std::pair<double, double> score_dist = get_avg_std(scores);
@@ -275,6 +292,15 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
               << " reward = " << std::get<0>(result);
     int steps = std::get<1>(result);
     int n_updates = int(steps * FLAGS_update_ratio);
+    if (tid == 0) {
+      UPDATES_TO_DO = n_updates;
+    } else {
+      while (UPDATES_TO_DO < 0) {
+        little_sleep(std::chrono::microseconds(100));
+      }
+      n_updates = UPDATES_TO_DO;
+      UPDATES_TO_DO = -1;
+    }
     for (int i=0; i<n_updates; ++i) {
       dqn->Update();
     }
