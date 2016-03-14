@@ -371,6 +371,24 @@ void BatchNormLayer(caffe::NetParameter& net_param,
   caffe::BatchNormParameter* param = layer.mutable_batch_norm_param();
 }
 
+std::string Tower(caffe::NetParameter& np,
+                  const std::string& layer_prefix,
+                  const std::string& input_blob_name,
+                  const std::vector<int>& layer_sizes) {
+  std::string input_name = input_blob_name;
+  for (int i=1; i<layer_sizes.size()+1; ++i) {
+    std::string layer_name = layer_prefix + "ip" + std::to_string(i) + "_layer";
+    std::string top_name = layer_prefix + "ip" + std::to_string(i);
+    IPLayer(np, layer_name, {input_name}, {top_name}, boost::none, layer_sizes[i-1]);
+    layer_name = layer_prefix + "ip" + std::to_string(i) + "_relu_layer";
+    ReluLayer(np, layer_name, {top_name}, {top_name}, boost::none);
+    // layer_name = layer_prefix + "bn" + std::to_string(i) + "_layer";
+    // BatchNormLayer(np, layer_name, {top_name}, {top_name}, boost::none);
+    input_name = top_name;
+  }
+  return input_name;
+}
+
 caffe::NetParameter CreateActorNet(int state_size) {
   caffe::NetParameter np;
   np.set_name("Actor");
@@ -378,22 +396,12 @@ caffe::NetParameter CreateActorNet(int state_size) {
   MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
   SilenceLayer(np, "silence", {"dummy1"}, {}, boost::none);
-  IPLayer(np, "ip1_layer", {states_blob_name}, {"ip1"}, boost::none, 1024);
-  // BatchNormLayer(np, "bn1_layer", {"ip1"}, {"ip1"}, boost::none);
-  ReluLayer(np, "ip1_relu_layer", {"ip1"}, {"ip1"}, boost::none);
-  IPLayer(np, "ip2_layer", {"ip1"}, {"ip2"}, boost::none, 512);
-  // BatchNormLayer(np, "bn2_layer", {"ip2"}, {"ip2"}, boost::none);
-  ReluLayer(np, "ip2_relu_layer", {"ip2"}, {"ip2"}, boost::none);
-  IPLayer(np, "ip3_layer", {"ip2"}, {"ip3"}, boost::none, 256);
-  // BatchNormLayer(np, "bn3_layer", {"ip3"}, {"ip3"}, boost::none);
-  ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
-  IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
-  // BatchNormLayer(np, "bn4_layer", {"ip4"}, {"ip4"}, boost::none);
-  ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
-  IPLayer(np, "action_layer", {"ip4"}, {"actions"}, boost::none, 4);
-  IPLayer(np, "actionpara_layer", {"ip4"}, {"action_params"}, boost::none, 6);
+  std::string tower_top = Tower(np, "", states_blob_name, {1024, 512, 256, 128});
+  IPLayer(np, "action_layer", {tower_top}, {"actions"}, boost::none, 4);
+  IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none, 6);
   return np;
 }
+
 caffe::NetParameter CreateCriticNet(int state_size) {
   caffe::NetParameter np;
   np.set_name("Critic");
@@ -412,19 +420,8 @@ caffe::NetParameter CreateCriticNet(int state_size) {
   ConcatLayer(np, "concat",
               {states_blob_name,actions_blob_name,action_params_blob_name},
               {"state_actions"}, boost::none, 2);
-  IPLayer(np, "ip1_layer", {"state_actions"}, {"ip1"}, boost::none, 1024);
-  // BatchNormLayer(np, "bn1_layer", {"ip1"}, {"ip1"}, boost::none);
-  ReluLayer(np, "ip1_relu_layer", {"ip1"}, {"ip1"}, boost::none);
-  IPLayer(np, "ip2_layer", {"ip1"}, {"ip2"}, boost::none, 512);
-  // BatchNormLayer(np, "bn2_layer", {"ip2"}, {"ip2"}, boost::none);
-  ReluLayer(np, "ip2_relu_layer", {"ip2"}, {"ip2"}, boost::none);
-  IPLayer(np, "ip3_layer", {"ip2"}, {"ip3"}, boost::none, 256);
-  // BatchNormLayer(np, "bn3_layer", {"ip3"}, {"ip3"}, boost::none);
-  ReluLayer(np, "ip3_relu_layer", {"ip3"}, {"ip3"}, boost::none);
-  IPLayer(np, "ip4_layer", {"ip3"}, {"ip4"}, boost::none, 128);
-  // BatchNormLayer(np, "bn4_layer", {"ip4"}, {"ip4"}, boost::none);
-  ReluLayer(np, "ip4_relu_layer", {"ip4"}, {"ip4"}, boost::none);
-  IPLayer(np, q_values_layer_name, {"ip4"}, {q_values_blob_name}, boost::none, 1);
+  std::string tower_top = Tower(np, "", "state_actions", {1024, 512, 256, 128});
+  IPLayer(np, q_values_layer_name, {tower_top}, {q_values_blob_name}, boost::none, 1);
   EuclideanLossLayer(np, "loss", {q_values_blob_name, targets_blob_name},
                      {loss_blob_name}, boost::none);
   return np;
