@@ -133,7 +133,6 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
       }
     }
   }
-  LOG(INFO) << "Status " << game.status;
   return std::make_tuple(game.total_reward, game.steps, game.status);
 }
 
