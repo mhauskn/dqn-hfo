@@ -17,6 +17,7 @@ using namespace hfo;
 
 DEFINE_bool(gpu, true, "Use GPU to brew Caffe");
 DEFINE_bool(benchmark, false, "Benchmark the network and exit");
+DEFINE_bool(learn_offline, false, "Just do updates on a fixed replaymemory.");
 // Load/Save Args
 DEFINE_string(save, "", "Prefix for saving snapshots");
 DEFINE_string(resume, "", "Prefix for resuming from. Default=save_path");
@@ -43,7 +44,7 @@ DEFINE_double(evaluate_with_epsilon, 0, "Epsilon value to be used in evaluation 
 // Evaluation Args
 DEFINE_bool(evaluate, false, "Evaluation mode: only playing a game, no updates");
 DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
-DEFINE_int32(repeat_games, 10, "Number of games played in evaluation mode");
+DEFINE_int32(repeat_games, 100, "Number of games played in evaluation mode");
 // Misc Args
 DEFINE_double(update_ratio, 0.1, "Ratio of new experiences to updates.");
 // Game configuration
@@ -281,6 +282,13 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   if (FLAGS_benchmark) {
     PlayOneEpisode(env, *dqn, FLAGS_evaluate_with_epsilon, true);
     dqn->Benchmark(1000);
+    return;
+  }
+  if (FLAGS_learn_offline) {
+    while (dqn->max_iter() < FLAGS_max_iter) {
+      dqn->Update();
+    }
+    dqn->Snapshot();
     return;
   }
   int last_eval_iter = 0;
