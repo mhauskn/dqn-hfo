@@ -29,6 +29,7 @@ DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, false, "Snapshot the replay memory along with the network.");
 DEFINE_bool(use_skills, false, "Uses a hierarchy of skills");
+DEFINE_double(beta_softmax_temp, .5, "Temperature for skill selection softmax.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -432,7 +433,13 @@ caffe::NetParameter CreateActorNet(int state_size) {
             kActionSize + kActionParamSize);
     std::string beta_tower = Tower(np, "beta_", states_blob_name, {1024, 512, 256, 128});
     IPLayer(np, "beta_logits_layers", {beta_tower}, {"beta_logits"}, boost::none, 2);
-    SoftmaxLayer(np, "beta_softmax_layer", {"beta_logits"}, {"beta_softmax"}, boost::none, 1);
+    CHECK_GT(FLAGS_beta_softmax_temp, 0) << "Temperature must be in (0, 1]";
+    CHECK_LE(FLAGS_beta_softmax_temp, 1) << "Temperature must be in (0, 1]";
+    float temperature = 1.0 / FLAGS_beta_softmax_temp;
+    DummyDataLayer(np, "dummy_temp", {"temperature"}, boost::none, {{32,2}}, {temperature});
+    EltwiseLayer(np, "eltwise_temp_layer", {"beta_logits", "temperature"}, {"temp_logits"},
+                 boost::none, caffe::EltwiseParameter_EltwiseOp_PROD);
+    SoftmaxLayer(np, "beta_softmax_layer", {"temp_logits"}, {"beta_softmax"}, boost::none, 1);
     SliceLayer(np, "beta_slice_layer", {"beta_softmax"}, {"sk1_gain", "sk2_gain"}, boost::none,
                1, {1});
     // Tile the gains for input into eltwise prod
@@ -761,6 +768,10 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   }
   InputDataIntoLayers(actor, states_input.data(), NULL, NULL, NULL, NULL);
   actor.ForwardPrefilled(nullptr);
+  if (FLAGS_use_skills) {
+    VLOG(1) << "Beta: " << actor.blob_by_name("beta_softmax")->data_at(0,0,0,0) << ", "
+            << actor.blob_by_name("beta_softmax")->data_at(0,1,0,0);
+  }
   std::vector<ActorOutput> actor_outputs(states_batch.size());
   const auto actions_blob = actor.blob_by_name(actions_blob_name);
   const auto action_params_blob = actor.blob_by_name(action_params_blob_name);
