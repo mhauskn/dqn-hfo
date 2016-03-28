@@ -114,6 +114,7 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
       dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
       dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
+      VLOG(1) << "Step " << game.steps;
       VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
       Action action = dqn::GetAction(actor_output);
       VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)

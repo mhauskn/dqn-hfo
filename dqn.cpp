@@ -750,6 +750,21 @@ ActorOutput DQN::SelectActionGreedily(caffe::Net<float>& actor,
       actor, std::vector<InputStates>{{last_states}}).front();
 }
 
+std::vector<ActorOutput> getActorOutput(caffe::Net<float>& actor,
+                                        int batch_size,
+                                        std::string actions_blob_name) {
+  std::vector<ActorOutput> actor_outputs(batch_size);
+  const auto actions_blob = actor.blob_by_name(actions_blob_name);
+  for (int n = 0; n < batch_size; ++n) {
+    ActorOutput actor_output;
+    for (int c = 0; c < kActionSize + kActionParamSize; ++c) {
+      actor_output[c] = actions_blob->data_at(n,c,0,0);
+    }
+    actor_outputs[n] = actor_output;
+  }
+  return actor_outputs;
+}
+
 std::vector<ActorOutput>
 DQN::SelectActionGreedily(caffe::Net<float>& actor,
                           const std::vector<InputStates>& states_batch) {
@@ -769,8 +784,14 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   InputDataIntoLayers(actor, states_input.data(), NULL, NULL, NULL, NULL);
   actor.ForwardPrefilled(nullptr);
   if (FLAGS_use_skills) {
+    VLOG(1) << "BetaLogits: " << actor.blob_by_name("beta_logits")->data_at(0,0,0,0) << ", "
+            << actor.blob_by_name("beta_logits")->data_at(0,1,0,0);
     VLOG(1) << "Beta: " << actor.blob_by_name("beta_softmax")->data_at(0,0,0,0) << ", "
             << actor.blob_by_name("beta_softmax")->data_at(0,1,0,0);
+    VLOG(1) << "Skill1: " << PrintActorOutput(
+        getActorOutput(actor, states_batch.size(), "sk1_out")[0]);
+    VLOG(1) << "Skill2: " << PrintActorOutput(
+        getActorOutput(actor, states_batch.size(), "sk2_out")[0]);
   }
   std::vector<ActorOutput> actor_outputs(states_batch.size());
   const auto actions_blob = actor.blob_by_name(actions_blob_name);
