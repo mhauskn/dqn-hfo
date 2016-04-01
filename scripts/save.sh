@@ -41,7 +41,9 @@ if [ "$AGENTS" -lt 2 ]; then
 fi
 
 # Plot Reward
-grep "Episode [0-9]* reward" $LOGS | lmj-plot -m '\[Agent0\] .* reward = (\S+).*' '\[Agent1\] .* reward = (\S+).*' --xlabel Episode --ylabel Reward --title $PREFIX -g -T $MARKERS $LEGEND -c Dark2 -o $SAVE"_reward.png" &
+grep "Episode [0-9]* reward" $LOGS | lmj-plot -m '\[Agent0\] .* reward = (\S+),.*' '\[Agent1\] .* reward = (\S+).*' --xlabel Episode --ylabel Reward --title $PREFIX -g -T $MARKERS $LEGEND -c Dark2 -o $SAVE"_reward.png" &
+
+grep "Episode [0-9]* reward" $LOGS | lmj-plot -m '.* Sk1Wins = (\d+),.*' '.* Sk2Wins = (\d+).*' --xlabel Episode --ylabel SkillWins --title $PREFIX -g -T $MARKERS -L tl -n Skill1 Skill2 -c Paired -o $SAVE"_skills.png" &
 
 # Plot Evaluation Reward
 grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*avg_reward = (\S+),.*reward_std = (\S+),.*' '\[Agent1\].*actor_iter = (\d+),.*avg_reward = (\S+),.*reward_std = (\S+),.*' --xlabel 'Iteration' --ylabel 'Average Reward' --title "$PREFIX Evaluation" -g -T $MARKERS $LEGEND -c Dark2 -f .5 -o $SAVE"_eval_reward.png" &

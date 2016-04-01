@@ -55,7 +55,8 @@ DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 
 // Global Variables Shared Between Threads
 int UPDATES_TO_DO = -1; // How many updates to perform after each episode
-
+int SK1_WINS = 0;
+int SK2_WINS = 0;
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -92,8 +93,11 @@ void little_sleep(std::chrono::microseconds us)
  */
 std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
                                                  dqn::DQN& dqn,
+                                                 dqn::DQN& dqn2,
                                                  const double epsilon,
                                                  const bool update) {
+  SK1_WINS=0;
+  SK2_WINS=0;
   HFOGameState game(dqn.unum());
   hfo.act(DASH, 0, 0);
   game.update(hfo);
@@ -114,11 +118,18 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
       dqn::InputStates input_states;
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
       dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
+      float sk1_q = dqn.EvaluateAction(input_states, actor_output);
+      dqn::ActorOutput actor_output2 = dqn2.SelectAction(input_states, epsilon);
+      float sk2_q = dqn2.EvaluateAction(input_states, actor_output2);
+      float sk1_Intrinsic = game.intrinsicReward(hfo, 1);
+      float sk2_Intrinsic = game.intrinsicReward(hfo, 2);
       VLOG(1) << "Step " << game.steps;
-      VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
-      Action action = dqn::GetAction(actor_output);
-      VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
-              << " Action: " << hfo::ActionToString(action.action);
+      VLOG(1) << "Skill1_Q = " << sk1_q << ", Skill1_I = " << sk1_Intrinsic
+              << ", Skill2_Q = " << sk2_q << ", Skill2_I = " << sk2_Intrinsic;
+      // VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
+      Action action = (sk1_q + sk1_Intrinsic) > (sk2_q + sk2_Intrinsic) ?
+          dqn::GetAction(actor_output) : dqn::GetAction(actor_output2);
+      VLOG(1) << "Action: " << hfo::ActionToString(action.action);
       hfo.act(action.action, action.arg1, action.arg2);
       game.update(hfo);
       float reward = game.reward();
@@ -131,7 +142,19 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
         const auto transition = (game.status == IN_GAME) ?
             dqn::Transition(input_states, actor_output, reward, next_state_sp):
             dqn::Transition(input_states, actor_output, reward, boost::none);
-        dqn.AddTransition(transition);
+        // With epsilon probability, add the transition to both networks
+        // if ((rand() / double(RAND_MAX)) < epsilon) {
+        //   dqn.AddTransition(transition);
+        //   dqn2.AddTransition(transition);
+        // } else { // Otherwise just add to the network that "won" the bidding
+        if ((sk1_q + sk1_Intrinsic) > (sk2_q + sk2_Intrinsic)) {
+          dqn.AddTransition(transition);
+          SK1_WINS++;
+        } else {
+          dqn2.AddTransition(transition);
+          SK2_WINS++;
+        }
+        // }
       }
     }
   }
@@ -154,7 +177,7 @@ std::pair<double,double> get_avg_std(std::vector<T> data) {
 }
 
 
-double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
+double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, dqn::DQN& dqn2, int tid) {
   LOG(INFO) << "[Agent" << tid << "] Evaluating for " << FLAGS_repeat_games
             << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon;
   std::vector<double> scores;
@@ -162,7 +185,7 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   std::vector<int> successful_trial_steps;
   int goals = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    auto result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, false);
+    auto result = PlayOneEpisode(hfo, dqn, dqn2, FLAGS_evaluate_with_epsilon, false);
     double trial_reward = std::get<0>(result);
     int trial_steps = std::get<1>(result);
     status_t trial_status = std::get<2>(result);
@@ -189,14 +212,7 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   return goal_percent;
 }
 
-void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
-  LOG(INFO) << "Thread " << tid << ", port=" << port << ", unum=" << unum
-            << ", save_prefix=" << save_prefix;
-  if (FLAGS_gpu) {
-    caffe::Caffe::set_mode(caffe::Caffe::GPU);
-  } else {
-    caffe::Caffe::set_mode(caffe::Caffe::CPU);
-  }
+dqn::DQN* CreateDQN(int tid, std::string save_prefix, int unum, int arg_indx) {
   // Look for a recent snapshot to resume
   std::string resume_path = FLAGS_resume.empty() ? save_prefix : FLAGS_resume;
   std::string last_actor_snapshot, last_critic_snapshot, last_memory_snapshot;
@@ -256,65 +272,91 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   critic_solver_param.set_momentum2(FLAGS_momentum2);
   actor_solver_param.set_clip_gradients(FLAGS_clip_grad);
   critic_solver_param.set_clip_gradients(FLAGS_clip_grad);
-
   dqn::DQN* dqn = new dqn::DQN(actor_solver_param, critic_solver_param,
                                save_prefix, num_features, tid, unum);
   // Load actor/critic/memory
-  if (!GetArg(FLAGS_actor_snapshot, tid).empty()) {
-    dqn->RestoreActorSolver(GetArg(FLAGS_actor_snapshot, tid));
-  } else if (!GetArg(FLAGS_actor_weights, tid).empty()) {
-    dqn->LoadActorWeights(GetArg(FLAGS_actor_weights, tid));
+  if (!GetArg(FLAGS_actor_snapshot, arg_indx).empty()) {
+    dqn->RestoreActorSolver(GetArg(FLAGS_actor_snapshot, arg_indx));
+  } else if (!GetArg(FLAGS_actor_weights, arg_indx).empty()) {
+    dqn->LoadActorWeights(GetArg(FLAGS_actor_weights, arg_indx));
   }
-  if (!GetArg(FLAGS_critic_snapshot, tid).empty()) {
-    dqn->RestoreCriticSolver(GetArg(FLAGS_critic_snapshot, tid));
-  } else if (!GetArg(FLAGS_critic_weights, tid).empty()) {
+  if (!GetArg(FLAGS_critic_snapshot, arg_indx).empty()) {
+    dqn->RestoreCriticSolver(GetArg(FLAGS_critic_snapshot, arg_indx));
+  } else if (!GetArg(FLAGS_critic_weights, arg_indx).empty()) {
     dqn->LoadCriticWeights(GetArg(FLAGS_critic_weights, 0));
   }
-  if (!GetArg(FLAGS_memory_snapshot, tid).empty()) {
-    dqn->LoadReplayMemory(GetArg(FLAGS_memory_snapshot, tid));
+  if (!GetArg(FLAGS_memory_snapshot, arg_indx).empty()) {
+    dqn->LoadReplayMemory(GetArg(FLAGS_memory_snapshot, arg_indx));
   }
+  return dqn;
+}
+
+void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
+  LOG(INFO) << "Thread " << tid << ", port=" << port << ", unum=" << unum
+            << ", save_prefix=" << save_prefix;
+  if (FLAGS_gpu) {
+    caffe::Caffe::set_mode(caffe::Caffe::GPU);
+  } else {
+    caffe::Caffe::set_mode(caffe::Caffe::CPU);
+  }
+
+  dqn::DQN* dqn = CreateDQN(tid, save_prefix + "_skill1", unum, 0);
+  dqn::DQN* dqn2 = CreateDQN(tid, save_prefix + "_skill2", unum, 1);
 
   HFOEnvironment env;
   ConnectToServer(env, port, unum);
   if (FLAGS_evaluate) {
-    Evaluate(env, *dqn, tid);
+    Evaluate(env, *dqn, *dqn2, tid);
     return;
   }
-  if (FLAGS_benchmark) {
-    PlayOneEpisode(env, *dqn, FLAGS_evaluate_with_epsilon, true);
-    dqn->Benchmark(1000);
-    return;
-  }
-  if (FLAGS_learn_offline) {
-    while (dqn->max_iter() < FLAGS_max_iter) {
-      dqn->Update();
-    }
-    dqn->Snapshot();
-    return;
-  }
+  // if (FLAGS_benchmark) {
+  //   PlayOneEpisode(env, *dqn, FLAGS_evaluate_with_epsilon, true);
+  //   dqn->Benchmark(1000);
+  //   return;
+  // }
+  // if (FLAGS_learn_offline) {
+  //   while (dqn->max_iter() < FLAGS_max_iter) {
+  //     dqn->Update();
+  //   }
+  //   dqn->Snapshot();
+  //   return;
+  // }
   int last_eval_iter = 0;
   double best_score = std::numeric_limits<double>::min();
   for (int episode = 0; dqn->max_iter() < FLAGS_max_iter; ++episode) {
     double epsilon = CalculateEpsilon(dqn->max_iter());
-    auto result = PlayOneEpisode(env, *dqn, epsilon, true);
+    auto result = PlayOneEpisode(env, *dqn, *dqn2, epsilon, true);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
-              << " reward = " << std::get<0>(result);
+              << " reward = " << std::get<0>(result)
+              << ", epsilon = " << epsilon
+              << ", R1Sz = " << dqn->memory_size()
+              << ", R2Sz = " << dqn2->memory_size()
+              << ", Sk1Wins = " << SK1_WINS
+              << ", Sk2Wins = " << SK2_WINS;
     int steps = std::get<1>(result);
-    int n_updates = int(steps * FLAGS_update_ratio);
-    if (tid == 0) {
-      UPDATES_TO_DO = n_updates;
-    } else {
-      while (UPDATES_TO_DO < 0) {
-        little_sleep(std::chrono::microseconds(100));
-      }
-      n_updates = UPDATES_TO_DO;
-      UPDATES_TO_DO = -1;
-    }
-    for (int i=0; i<n_updates; ++i) {
+    for (int i=0; i<(SK1_WINS * FLAGS_update_ratio); ++i) {
       dqn->Update();
     }
+    for (int i=0; i<(SK2_WINS * FLAGS_update_ratio); ++i) {
+      dqn2->Update();
+    }
+    // int n_updates = int(steps * FLAGS_update_ratio);
+    // if (tid == 0) {
+    //   UPDATES_TO_DO = n_updates;
+    // } else {
+    //   while (UPDATES_TO_DO < 0) {
+    //     little_sleep(std::chrono::microseconds(100));
+    //   }
+    //   n_updates = UPDATES_TO_DO;
+    //   UPDATES_TO_DO = -1;
+    // }
+    // for (int i=0; i<n_updates; ++i) {
+    //   dqn->Update();
+    //   dqn2->Update();
+    // }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
-      double avg_score = Evaluate(env, *dqn, tid);
+      double avg_score = Evaluate(env, *dqn, *dqn2, tid);
+      LOG(INFO) << "EvaluationScore " << avg_score << " Best: " << best_score;
       if (avg_score > best_score) {
         LOG(INFO) << "[Agent " << tid << "] New High Score: " << avg_score
                   << ", actor_iter = " << dqn->actor_iter()
@@ -323,12 +365,17 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
         dqn::RemoveFilesMatchingRegexp(dqn->save_path() + "_HiScore.*");
         std::string fname = dqn->save_path() + "_HiScore" + std::to_string(avg_score);
         dqn->Snapshot(fname, false, false);
+        dqn::RemoveFilesMatchingRegexp(dqn2->save_path() + "_HiScore.*");
+        fname = dqn2->save_path() + "_HiScore" + std::to_string(avg_score);
+        dqn2->Snapshot(fname, false, false);
       }
       last_eval_iter = dqn->actor_iter();
     }
   }
   dqn->Snapshot();
+  dqn2->Snapshot();
   delete dqn;
+  delete dqn2;
 }
 
 int main(int argc, char** argv) {

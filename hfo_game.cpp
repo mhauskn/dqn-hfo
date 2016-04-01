@@ -145,6 +145,23 @@ float HFOGameState::reward() {
   return reward;
 }
 
+float HFOGameState::intrinsicReward(hfo::HFOEnvironment& hfo, int skill_number) {
+  CHECK(skill_number == 1 || skill_number == 2) << "Valid skill numbers are 1 and 2";
+  const std::vector<float>& current_state = hfo.getState();
+  float goal_proximity = current_state[15];
+  VLOG(1) << "GoalProx = " << goal_proximity;
+  // Proximity grows as the agent approaches the goal.
+  bool close_to_goal = goal_proximity > 0.05;
+  // Use Skill 1 far from goal, skill2 close to goal
+  if (skill_number == 2 && close_to_goal) {
+    return 10000;
+  }
+  if (skill_number == 1 && !close_to_goal) {
+    return 10000;
+  }
+  return 0;
+}
+
 // Reward for moving to ball and getting kickable. Ends episode once
 // kickable is attained.
 float HFOGameState::move_to_ball_reward() {

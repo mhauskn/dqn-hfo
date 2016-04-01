@@ -2,13 +2,28 @@
 
 # set -e
 
-# 3-21-16 Using beta_softmax_temp
-values=".05 .15 .5"
+# 3-28-16 And some 1v1 jobs
+# values="1 2"
+# for v in $values;
+# do
+#     JOB="dualAC_1v1_$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -defense_npcs 1`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
+
+# 3-28-16 New architecture with Actor/Critics for each skill
+values="1 2"
 for v in $values;
 do
-    JOB="BST_$v"
+    JOB="dualAC_$v"
     SAVE="state/$JOB"
-    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -use_skills -beta_softmax_temp $v`
+    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE`
     ACTIVE="~/public_html/exp_vis/active/"$JOB
     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
@@ -16,6 +31,21 @@ do
     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 done
+
+# 3-21-16 Using beta_softmax_temp
+# values=".05 .15 .5"
+# for v in $values;
+# do
+#     JOB="BST_$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -use_skills -beta_softmax_temp $v`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
 
 # # 3-14-16 Skills versus goalie
 # values="1 2"

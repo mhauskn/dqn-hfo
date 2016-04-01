@@ -38,6 +38,9 @@ class HFOGameState {
   float kick_to_goal_reward();
   float EOT_reward();
 
+  // Returns the intrinsic reward given to a skill
+  float intrinsicReward(hfo::HFOEnvironment& hfo, int skill_number);
+
  public:
   float old_ball_prox, ball_prox_delta;
   float old_kickable, kickable_delta;
