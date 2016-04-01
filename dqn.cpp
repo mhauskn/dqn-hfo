@@ -28,8 +28,6 @@ DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, false, "Snapshot the replay memory along with the network.");
-DEFINE_bool(use_skills, false, "Uses a hierarchy of skills");
-DEFINE_double(beta_softmax_temp, .5, "Temperature for skill selection softmax.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -423,45 +421,9 @@ caffe::NetParameter CreateActorNet(int state_size) {
   MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
   SilenceLayer(np, "silence", {"dummy1"}, {}, boost::none);
-  if (FLAGS_use_skills) {
-    // Define two skills and a network for selecting between them
-    std::string sk1_tower = Tower(np, "sk1_", states_blob_name, {1024, 512, 256, 128});
-    IPLayer(np, "sk1_output_layer", {sk1_tower}, {"sk1_out"}, boost::none,
-            kActionSize + kActionParamSize);
-    std::string sk2_tower = Tower(np, "sk2_", states_blob_name, {1024, 512, 256, 128});
-    IPLayer(np, "sk2_output_layer", {sk2_tower}, {"sk2_out"}, boost::none,
-            kActionSize + kActionParamSize);
-    std::string beta_tower = Tower(np, "beta_", states_blob_name, {1024, 512, 256, 128});
-    IPLayer(np, "beta_logits_layers", {beta_tower}, {"beta_logits"}, boost::none, 2);
-    CHECK_GT(FLAGS_beta_softmax_temp, 0) << "Temperature must be in (0, 1]";
-    CHECK_LE(FLAGS_beta_softmax_temp, 1) << "Temperature must be in (0, 1]";
-    float temperature = 1.0 / FLAGS_beta_softmax_temp;
-    DummyDataLayer(np, "dummy_temp", {"temperature"}, boost::none, {{32,2}}, {temperature});
-    EltwiseLayer(np, "eltwise_temp_layer", {"beta_logits", "temperature"}, {"temp_logits"},
-                 boost::none, caffe::EltwiseParameter_EltwiseOp_PROD);
-    SoftmaxLayer(np, "beta_softmax_layer", {"temp_logits"}, {"beta_softmax"}, boost::none, 1);
-    SliceLayer(np, "beta_slice_layer", {"beta_softmax"}, {"sk1_gain", "sk2_gain"}, boost::none,
-               1, {1});
-    // Tile the gains for input into eltwise prod
-    TileLayer(np, "beta_sk0_tile", {"sk1_gain"}, {"sk1_tile"}, boost::none, 1,
-              kActionSize + kActionParamSize);
-    TileLayer(np, "beta_sk1_tile", {"sk2_gain"}, {"sk2_tile"}, boost::none, 1,
-              kActionSize + kActionParamSize);
-    // Eltwise Layers
-    EltwiseLayer(np, "eltwise_sk1_layer", {"sk1_out", "sk1_tile"}, {"sk1_weighted"},
-                 boost::none, caffe::EltwiseParameter_EltwiseOp_PROD);
-    EltwiseLayer(np, "eltwise_sk2_layer", {"sk2_out", "sk2_tile"}, {"sk2_weighted"},
-                 boost::none, caffe::EltwiseParameter_EltwiseOp_PROD);
-    EltwiseLayer(np, "eltwise_sum_layer", {"sk1_weighted", "sk2_weighted"}, {"weighted_output"},
-                 boost::none, caffe::EltwiseParameter_EltwiseOp_SUM);
-    // Slice into actions and params
-    SliceLayer(np, "action_slice_layer", {"weighted_output"},
-               {actions_blob_name, action_params_blob_name}, boost::none, 1, {kActionSize});
-  } else {
-    std::string tower_top = Tower(np, "", states_blob_name, {1024, 512, 256, 128});
-    IPLayer(np, "action_layer", {tower_top}, {"actions"}, boost::none, 4);
-    IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none, 6);
-  }
+  std::string tower_top = Tower(np, "", states_blob_name, {1024, 512, 256, 128});
+  IPLayer(np, "action_layer", {tower_top}, {"actions"}, boost::none, 4);
+  IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none, 6);
   return np;
 }
 
@@ -783,16 +745,6 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   }
   InputDataIntoLayers(actor, states_input.data(), NULL, NULL, NULL, NULL);
   actor.ForwardPrefilled(nullptr);
-  if (FLAGS_use_skills) {
-    VLOG(1) << "BetaLogits: " << actor.blob_by_name("beta_logits")->data_at(0,0,0,0) << ", "
-            << actor.blob_by_name("beta_logits")->data_at(0,1,0,0);
-    VLOG(1) << "Beta: " << actor.blob_by_name("beta_softmax")->data_at(0,0,0,0) << ", "
-            << actor.blob_by_name("beta_softmax")->data_at(0,1,0,0);
-    VLOG(1) << "Skill1: " << PrintActorOutput(
-        getActorOutput(actor, states_batch.size(), "sk1_out")[0]);
-    VLOG(1) << "Skill2: " << PrintActorOutput(
-        getActorOutput(actor, states_batch.size(), "sk2_out")[0]);
-  }
   std::vector<ActorOutput> actor_outputs(states_batch.size());
   const auto actions_blob = actor.blob_by_name(actions_blob_name);
   const auto action_params_blob = actor.blob_by_name(action_params_blob_name);
@@ -984,8 +936,7 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   actor_actions_blob->ShareDiff(*critic_action_blob);
   actor_action_params_blob->ShareDiff(*critic_action_params_blob);
   DLOG(INFO) << " [Backwards] " << actor_net_->name();
-  actor_net_->BackwardFrom(GetLayerIndex(
-      *actor_net_, FLAGS_use_skills ? "action_slice_layer" : "actionpara_layer"));
+  actor_net_->BackwardFrom(GetLayerIndex(*actor_net_, "actionpara_layer"));
   actor_solver_->ApplyUpdate();
   actor_solver_->set_iter(actor_solver_->iter() + 1);
   // Soft update the target networks
