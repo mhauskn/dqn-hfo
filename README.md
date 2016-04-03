@@ -51,6 +51,6 @@ changes:
 3. Now we are ready to install dqn-hfo:
   1. ```git clone https://github.com/mhauskn/dqn-hfo.git```
   2. ```cd dqn-hfo```
-  3. ```cmake -DCMAKE_BUILD_TYPE=Release -DCAFFE_ROOT_DIR=/u/mhauskn/projects/caffe/ -DHFO_ROOT_DIR=/u/mhauskn/projects/HFO/ .```
+  3. ```cmake -DCMAKE_BUILD_TYPE=Release -DCAFFE_ROOT_DIR=/u/mhauskn/projects/caffe/ -DHFO_ROOT_DIR=/u/mhauskn/projects/HFO/ .``` You will have to change the paths to point to your installation of caffe and HFO
   4. ```make -j4```
 4. Run a test job: ```mkdir state && ./dqn -save state/test -alsologtostderr```
