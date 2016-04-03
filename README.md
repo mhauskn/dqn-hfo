@@ -37,3 +37,20 @@ changes:
    void TestAll();
    void Test(const int test_net_id = 0);
 ```
+
+## Installation
+
+1. First install the correct version of Caffe:
+..1. ```git clone https://github.com/BVLC/caffe.git```
+..2. ```cd caffe && git checkout ff16f6e43dd718921e5203f640dd57c68f01cdb3```
+..3. Apply the changes to solver listed above
+..4. Follow installation instructions at https://github.com/BVLC/caffe
+2. Next install HFO:
+..1. ```git clone https://github.com/LARG/HFO.git```
+..2. Follow installation instructions at https://github.com/LARG/HFO
+3. Now we are ready to install dqn-hfo:
+..1. ```git clone https://github.com/mhauskn/dqn-hfo.git```
+..2. ```cd dqn-hfo```
+..3. ```cmake -DCMAKE_BUILD_TYPE=Release -DCAFFE_ROOT_DIR=/u/mhauskn/projects/caffe/ -DHFO_ROOT_DIR=/u/mhauskn/projects/HFO/ .```
+..3. ```make -j4```
+4. Run a test job: ```mkdir state && ./dqn -save state/test -alsologtostderr```
