@@ -95,6 +95,7 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
                                                  dqn::DQN& dqn,
                                                  dqn::DQN& dqn2,
                                                  const double epsilon,
+                                                 const double epsilon2,
                                                  const bool update) {
   SK1_WINS=0;
   SK2_WINS=0;
@@ -119,7 +120,7 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
       std::copy(past_states.begin(), past_states.end(), input_states.begin());
       dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
       float sk1_q = dqn.EvaluateAction(input_states, actor_output);
-      dqn::ActorOutput actor_output2 = dqn2.SelectAction(input_states, epsilon);
+      dqn::ActorOutput actor_output2 = dqn2.SelectAction(input_states, epsilon2);
       float sk2_q = dqn2.EvaluateAction(input_states, actor_output2);
       float sk1_Intrinsic = game.intrinsicReward(hfo, 1);
       float sk2_Intrinsic = game.intrinsicReward(hfo, 2);
@@ -185,7 +186,8 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, dqn::DQN& dqn2, int tid) {
   std::vector<int> successful_trial_steps;
   int goals = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    auto result = PlayOneEpisode(hfo, dqn, dqn2, FLAGS_evaluate_with_epsilon, false);
+    auto result = PlayOneEpisode(hfo, dqn, dqn2, FLAGS_evaluate_with_epsilon,
+                                 FLAGS_evaluate_with_epsilon, false);
     double trial_reward = std::get<0>(result);
     int trial_steps = std::get<1>(result);
     status_t trial_status = std::get<2>(result);
@@ -325,17 +327,23 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   double best_score = std::numeric_limits<double>::min();
   for (int episode = 0; dqn->max_iter() < FLAGS_max_iter; ++episode) {
     double epsilon = CalculateEpsilon(dqn->max_iter());
-    auto result = PlayOneEpisode(env, *dqn, *dqn2, epsilon, true);
+    double epsilon2 = CalculateEpsilon(dqn2->max_iter());
+    auto result = PlayOneEpisode(env, *dqn, *dqn2, epsilon, epsilon2, true);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
               << " reward = " << std::get<0>(result)
               << ", epsilon = " << epsilon
+              << ", epsilon2 = " << epsilon2
               << ", R1Sz = " << dqn->memory_size()
               << ", R2Sz = " << dqn2->memory_size()
               << ", Sk1Wins = " << SK1_WINS
               << ", Sk2Wins = " << SK2_WINS;
     int steps = std::get<1>(result);
+    dqn->CopyWeightsFrom(dqn2);
     for (int i=0; i<(SK1_WINS * FLAGS_update_ratio); ++i) {
       dqn->Update();
+    }
+    if (SK2_WINS > 0) {
+      dqn2->CopyWeightsFrom(dqn);
     }
     for (int i=0; i<(SK2_WINS * FLAGS_update_ratio); ++i) {
       dqn2->Update();

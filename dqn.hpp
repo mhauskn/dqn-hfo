@@ -108,6 +108,10 @@ public:
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
 
+  void CopyWeightsFrom(DQN *source);
+  void CopyWeights(NetSp& source_network, NetSp& target_network,
+                   std::vector<std::string>& layers_to_copy);
+
   // Return the current iteration of the solvers
   int min_iter() const { return std::min(actor_iter(), critic_iter()); }
   int max_iter() const { return std::max(actor_iter(), critic_iter()); }

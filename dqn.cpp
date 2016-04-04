@@ -1059,6 +1059,38 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
   }
 }
 
+void DQN::CopyWeightsFrom(DQN *source) {
+  std::vector<std::string> layers_to_copy = {"ip1_layer", "ip2_layer", "ip3_layer"};
+  CopyWeights(source->actor_net_, actor_net_, layers_to_copy);
+  CopyWeights(source->actor_target_net_, actor_target_net_, layers_to_copy);
+  CopyWeights(source->critic_net_, critic_net_, layers_to_copy);
+  CopyWeights(source->critic_target_net_, critic_target_net_, layers_to_copy);
+}
+
+void DQN::CopyWeights(NetSp& source_network, NetSp& target_network,
+                      std::vector<std::string>& layers_to_copy) {
+  for (std::string layer : layers_to_copy) {
+    DLOG(INFO) << "Copying source layer " << layer;
+    const auto source_layer = source_network->layer_by_name(layer);
+    CHECK(source_layer);
+    const auto target_layer = target_network->layer_by_name(layer);
+    CHECK(target_layer);
+    std::vector<boost::shared_ptr<caffe::Blob<float> > >& source_blobs = source_layer->blobs();
+    std::vector<boost::shared_ptr<caffe::Blob<float> > >& target_blobs = target_layer->blobs();
+    CHECK_EQ(target_blobs.size(), source_blobs.size())
+        << "Incompatible number of blobs for layer " << layer;
+    for (int j = 0; j < target_blobs.size(); ++j) {
+      DLOG(INFO) << "PreCopy Blob " << j
+                 << " Source " << source_blobs[j]->data_at(0,0,0,0)
+                 << " Target " << target_blobs[j]->data_at(0,0,0,0);
+      target_blobs[j]->CopyFrom(*source_blobs[j]);
+      DLOG(INFO) << "PosCopy Blob " << j
+                 << " Source " << source_blobs[j]->data_at(0,0,0,0)
+                 << " Target " << target_blobs[j]->data_at(0,0,0,0);
+    }
+  }
+}
+
 void DQN::SoftUpdateNet(NetSp& net_from, NetSp& net_to, float tau) {
   // TODO: Test if learnable_params() is sufficient for soft update
   const auto& from_params = net_from->params();
