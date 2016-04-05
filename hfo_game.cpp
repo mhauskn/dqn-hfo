@@ -35,10 +35,9 @@ void StopHFOServer() {
   CHECK_EQ(system("killall -9 rcssserver"), 0) << "Unable to kill the HFO server.";
 }
 
-void ConnectToServer(hfo::HFOEnvironment& hfo_env, int port, int unum) {
+void ConnectToServer(hfo::HFOEnvironment& hfo_env, int port) {
   hfo_env.connectToServer(LOW_LEVEL_FEATURE_SET,
                           FLAGS_config_dir,
-                          unum,
                           port,
                           FLAGS_server_addr,
                           FLAGS_team_name,

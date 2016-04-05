@@ -306,7 +306,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   dqn::DQN* dqn2 = CreateDQN(tid, save_prefix + "_skill2", unum, 1);
 
   HFOEnvironment env;
-  ConnectToServer(env, port, unum);
+  ConnectToServer(env, port);
   if (FLAGS_evaluate) {
     Evaluate(env, *dqn, *dqn2, tid);
     return;
