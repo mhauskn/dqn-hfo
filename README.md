@@ -57,7 +57,7 @@ changes:
 
 ## Errors
 
-1. Cannot find cublas_v2.h:
+### Cannot find cublas_v2.h:
 ```device_alternate.hpp:34:23: fatal error: cublas_v2.h: No such file or directory
  #include <cublas_v2.h>
                        ^
@@ -68,7 +68,7 @@ Solution: Include your Cuda path in the installation:
   1. ```locate cublas_v2.h``` -- this should give you the path to your cuda installation
   2. ```export CPLUS_INCLUDE_PATH=/your/cuda/path:$CPLUS_INCLUDE_PATH```
 
-2. ```caffe/include/caffe/blob.hpp:9:34: fatal error: caffe/proto/caffe.pb.h: No such file or directory
+### ```caffe/include/caffe/blob.hpp:9:34: fatal error: caffe/proto/caffe.pb.h: No such file or directory
  #include "caffe/proto/caffe.pb.h"```
 
 Solution: Symlink the built proto files.
