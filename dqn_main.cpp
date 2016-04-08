@@ -281,7 +281,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   }
 
   HFOEnvironment env;
-  ConnectToServer(env, port, unum);
+  ConnectToServer(env, port);
   if (FLAGS_evaluate) {
     Evaluate(env, *dqn, tid);
     return;

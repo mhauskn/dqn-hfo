@@ -23,7 +23,7 @@ void StartHFOServer(int port, int offense_agents, int offense_npcs,
 void StopHFOServer();
 
 // Creates an interface for a single agent to connect to the server
-void ConnectToServer(hfo::HFOEnvironment& hfo_env, int port=6000, int unum=11);
+void ConnectToServer(hfo::HFOEnvironment& hfo_env, int port=6000);
 
 // Returns a random HFO Action
 Action GetRandomHFOAction(std::mt19937& random_engine);
