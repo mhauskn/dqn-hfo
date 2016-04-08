@@ -17,6 +17,7 @@ DEFINE_bool(play_goalie, false, "Should the agent play goalie.");
 DEFINE_string(record_dir, "", "Directory to record states,actions,rewards.");
 DEFINE_double(ball_x_min, 0, "Ball X-Position initialization minimum.");
 DEFINE_double(ball_x_max, 0.2, "Ball X-Position initialization maximum.");
+DEFINE_int32(offense_on_ball, 0, "Offensive player to give the ball to.");
 
 void StartHFOServer(int port, int offense_agents, int offense_npcs,
                     int defense_agents, int defense_npcs) {
@@ -26,7 +27,8 @@ void StartHFOServer(int port, int offense_agents, int offense_npcs,
       + " --defense-agents " + std::to_string(defense_agents)
       + " --defense-npcs " + std::to_string(defense_npcs)
       + " --ball-x-min " + std::to_string(FLAGS_ball_x_min)
-      + " --ball-x-max " + std::to_string(FLAGS_ball_x_max);
+      + " --ball-x-max " + std::to_string(FLAGS_ball_x_max)
+      + " --offense-on-ball " + std::to_string(FLAGS_offense_on_ball);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_log_game) { cmd += " --no-logging"; }
   cmd += " &";
