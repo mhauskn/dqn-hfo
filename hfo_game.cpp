@@ -15,6 +15,8 @@ DEFINE_string(server_addr, "localhost", "Address of rcssserver.");
 DEFINE_string(team_name, "base_left", "Name of team for agents.");
 DEFINE_bool(play_goalie, false, "Should the agent play goalie.");
 DEFINE_string(record_dir, "", "Directory to record states,actions,rewards.");
+DEFINE_double(ball_x_min, 0, "Ball X-Position initialization minimum.");
+DEFINE_double(ball_x_max, 0.2, "Ball X-Position initialization maximum.");
 
 void StartHFOServer(int port, int offense_agents, int offense_npcs,
                     int defense_agents, int defense_npcs) {
@@ -22,7 +24,9 @@ void StartHFOServer(int port, int offense_agents, int offense_npcs,
       + " --offense-agents " + std::to_string(offense_agents)
       + " --offense-npcs " + std::to_string(offense_npcs)
       + " --defense-agents " + std::to_string(defense_agents)
-      + " --defense-npcs " + std::to_string(defense_npcs);
+      + " --defense-npcs " + std::to_string(defense_npcs)
+      + " --ball-x-min " + std::to_string(FLAGS_ball_x_min)
+      + " --ball-x-max " + std::to_string(FLAGS_ball_x_max);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_log_game) { cmd += " --no-logging"; }
   cmd += " &";

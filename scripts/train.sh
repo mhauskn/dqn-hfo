@@ -2,6 +2,51 @@
 
 # set -e
 
+# 3-31-16 Lets try this on 1v1!
+values="0 .2 .5 .8 1"
+for v in $values;
+do
+    JOB="Hybrid1v1_beta$v"
+    SAVE="state/$JOB"
+    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -beta $v -defense_npcs=1`
+    ACTIVE="~/public_html/exp_vis/active/"$JOB
+    VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+    SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+    FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+    EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+    nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+done
+
+# 3-30-16 Hybrid learning with forward sampling rather than random
+# values="0 .2 .5 .8 1"
+# for v in $values;
+# do
+#     JOB="ForwardSampling_beta$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -beta $v`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
+
+# 3-29-16 Hybrid learning from on-policy and off-policy values
+# values="0 .2 .5 .8 1"
+# for v in $values;
+# do
+#     JOB="Hybrid_beta$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -beta $v`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
+
 # 3-12-16 Learning with a teammate
 # values="0 1"
 # for v in $values;
@@ -18,30 +63,30 @@
 # done
 
 # 3-11-16 2v1 test with naive shaped reward
-values="1 2"
-for v in $values;
-do
-    JOB="2v1_$v"
-    SAVE="state/$JOB"
-    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_npcs 1`
-    ACTIVE="~/public_html/exp_vis/active/"$JOB
-    VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
-    SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
-    FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
-    EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
-    nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
-done
+# values="1 2"
+# for v in $values;
+# do
+#     JOB="2v1_$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_npcs 1`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
 
 # 3-8-16 2v0 testing
-JOB="2v0"
-SAVE="state/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2`
-ACTIVE="~/public_html/exp_vis/active/"$JOB
-VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
-SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
-FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
-EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
-nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# JOB="2v0"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2`
+# ACTIVE="~/public_html/exp_vis/active/"$JOB
+# VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+# SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+# FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+# EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+# nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 
 # 3-8-16 Regression testing on single agent learning
 # values="1 2"
