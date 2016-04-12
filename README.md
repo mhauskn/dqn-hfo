@@ -4,9 +4,9 @@ This is an continuous action deep reinforcement learning agent for the
 RoboCup 2D domain. The domain can be found and downloaded from
 https://github.com/mhauskn/HFO.
 
-This repo is designed to work with the latest version of
-[Caffe](https://github.com/BVLC/caffe) (currently commit
-ff16f6e43dd718921e5203f640dd57c68f01cdb3) with the following minor
+This repo is designed to work with a specific version of
+[Caffe](https://github.com/BVLC/caffe) (commit
+2ef584785c8ade90260eb117f189146364494183) with the following minor
 changes:
 
 ```
@@ -42,7 +42,7 @@ changes:
 
 1. First install the correct version of Caffe:
   1. ```git clone https://github.com/BVLC/caffe.git```
-  2. ```cd caffe && git checkout ff16f6e43dd718921e5203f640dd57c68f01cdb3```
+  2. ```cd caffe && git checkout 2ef584785c8ade90260eb117f189146364494183```
   3. Apply the changes to solver listed above
   4. Follow installation instructions at https://github.com/BVLC/caffe
 2. Next install HFO:
