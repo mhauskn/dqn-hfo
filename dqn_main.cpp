@@ -52,6 +52,8 @@ DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
 DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
 DEFINE_int32(defense_agents, 0, "Number of agents playing defense");
 DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
+DEFINE_int32(offense_dummies, 0, "Number of dummy npcs playing offense");
+DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
 
 // Global Variables Shared Between Threads
 int UPDATES_TO_DO = -1; // How many updates to perform after each episode
@@ -224,9 +226,9 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
   int num_features = NumStateFeatures(FLAGS_offense_agents,
-                                      FLAGS_offense_npcs,
+                                      FLAGS_offense_npcs + FLAGS_offense_dummies,
                                       FLAGS_defense_agents,
-                                      FLAGS_defense_npcs);
+                                      FLAGS_defense_npcs + FLAGS_defense_dummies);
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
@@ -337,6 +339,10 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   delete dqn;
 }
 
+void SystemExecute(std::string cmd) {
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to execute command";
+}
+
 int main(int argc, char** argv) {
   std::string usage(argv[0]);
   usage.append(" -[evaluate|save [path]]");
@@ -361,9 +367,12 @@ int main(int argc, char** argv) {
   google::SetLogDestination(google::GLOG_FATAL, (save_path.native() + "_FATAL_").c_str());
   srand(std::hash<std::string>()(save_path.native()));
   int port = rand() % 40000 + 20000;
-  StartHFOServer(port, FLAGS_offense_agents, FLAGS_offense_npcs,
-                 FLAGS_defense_agents, FLAGS_defense_npcs);
-  std::thread player_threads[FLAGS_offense_agents];
+  std::thread server_thread(StartHFOServer, port,
+                            FLAGS_offense_agents + FLAGS_offense_dummies,
+                            FLAGS_offense_npcs,
+                            FLAGS_defense_agents + FLAGS_defense_dummies,
+                            FLAGS_defense_npcs);
+  std::thread player_threads[FLAGS_offense_agents + FLAGS_offense_dummies + FLAGS_defense_dummies];
   std::vector<int> offense_unums = {11,7,8,9,10,6,3,2,4,5};
   std::sort(offense_unums.begin(), offense_unums.begin() + FLAGS_offense_agents);
   for (int i=0; i<FLAGS_offense_agents; ++i) {
@@ -371,6 +380,14 @@ int main(int argc, char** argv) {
     player_threads[i] = std::thread(KeepPlayingGames, i, save_prefix, port,
                                     offense_unums[i]);
     sleep(10);
+  }
+  for (int i=0; i<FLAGS_offense_dummies; ++i) {
+    player_threads[FLAGS_offense_agents + i] =
+        std::thread(StartDummyTeammate, port);
+  }
+  for (int i=0; i<FLAGS_defense_dummies; ++i) {
+    player_threads[FLAGS_offense_agents + FLAGS_offense_dummies + i] =
+        std::thread(StartDummyGoalie, port);
   }
   for (int i = 0; i < FLAGS_offense_agents; ++i) {
     player_threads[i].join();

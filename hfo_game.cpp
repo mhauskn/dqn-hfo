@@ -31,10 +31,25 @@ void StartHFOServer(int port, int offense_agents, int offense_npcs,
       + " --offense-on-ball " + std::to_string(FLAGS_offense_on_ball);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_log_game) { cmd += " --no-logging"; }
-  cmd += " &";
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
   sleep(10);
+}
+
+void StartDummyTeammate(int port) {
+  std::string cmd = "./hfo_policies/dummy_teammate " + std::to_string(port);
+  cmd += " > /dev/null";
+  LOG(INFO) << "Starting dummy teammate with command: " << cmd;
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start dummy teammate.";
+  sleep(5);
+}
+
+void StartDummyGoalie(int port) {
+  std::string cmd = "./hfo_policies/dummy_goalie " + std::to_string(port);
+  cmd += " > /dev/null";
+  LOG(INFO) << "Starting dummy goalie with command: " << cmd;
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start dummy goalie.";
+  sleep(5);
 }
 
 void StopHFOServer() {

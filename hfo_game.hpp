@@ -20,6 +20,9 @@ inline int NumStateFeatures(int offense_agents, int offense_npcs,
 void StartHFOServer(int port, int offense_agents, int offense_npcs,
                     int defense_agents, int defense_npcs);
 
+void StartDummyTeammate(int port);
+void StartDummyGoalie(int port);
+
 void StopHFOServer();
 
 // Creates an interface for a single agent to connect to the server

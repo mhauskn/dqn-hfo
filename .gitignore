@@ -36,3 +36,5 @@ log/
 matplotlibrc
 scripts/HFO
 state/
+hfo_policies/dummy_goalie
+hfo_policies/dummy_teammate

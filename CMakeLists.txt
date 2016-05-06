@@ -38,3 +38,11 @@ endif()
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
   COMMAND ln -sf ${HFO_ROOT_DIR}/bin/HFO ${CMAKE_CURRENT_SOURCE_DIR}/scripts)
+
+add_executable(dummy_teammate ${CMAKE_CURRENT_SOURCE_DIR}/hfo_policies/dummy_teammate.cpp)
+set_target_properties(dummy_teammate PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/hfo_policies)
+target_link_libraries(dummy_teammate ${HFO_LIBRARIES})
+
+add_executable(dummy_goalie ${CMAKE_CURRENT_SOURCE_DIR}/hfo_policies/dummy_goalie.cpp)
+set_target_properties(dummy_goalie PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/hfo_policies)
+target_link_libraries(dummy_goalie ${HFO_LIBRARIES})
