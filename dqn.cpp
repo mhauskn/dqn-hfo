@@ -28,6 +28,7 @@ DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
 DEFINE_bool(snapshot_memory, false, "Snapshot the replay memory along with the network.");
+DEFINE_double(beta, .5, "Mix between off-policy and on-policy updates.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -776,6 +777,22 @@ void DQN::AddTransitions(const std::vector<Transition>& transitions) {
   replay_memory_.insert(it, transitions.begin(), transitions.end());
 }
 
+void DQN::LabelTransitions(std::vector<Transition>& transitions) {
+  CHECK_GT(transitions.size(), 0) << "Need at least one transition to label.";
+  Transition& last = transitions[transitions.size()-1];
+  std::get<3>(last) = std::get<2>(last); // Q-Val is just the final reward
+  for (int i=transitions.size()-2; i>=0; --i) {
+    Transition& t = transitions[i];
+    float reward = std::get<2>(t);
+    float target = std::get<3>(transitions[i+1]);
+    std::get<3>(t) = reward + gamma_ * target;
+  }
+  // for (const Transition & t : transitions) {
+  //   LOG(INFO) << "Transition reward " << std::get<2>(t)
+  //             << " QVal " << std::get<3>(t);
+  // }
+}
+
 void DQN::Update() {
   if (memory_size() < FLAGS_memory_threshold) {
     return;
@@ -827,6 +844,7 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   std::vector<InputStates> states_batch(kMinibatchSize);
   std::vector<ActorOutput> actions_batch(kMinibatchSize);
   std::vector<float> rewards_batch(kMinibatchSize);
+  std::vector<float> on_policy_targets(kMinibatchSize);
   std::vector<bool> terminal(kMinibatchSize);
   std::vector<InputStates> next_states_batch;
   next_states_batch.reserve(kMinibatchSize);
@@ -852,14 +870,15 @@ std::pair<float,float> DQN::UpdateActorCritic() {
               action_params_input.begin() + critic_action_params_blob->offset(n,0,0,0));
     actions_batch[n] = actor_output;
     const float reward = std::get<2>(transition);
+    on_policy_targets[n] = std::get<3>(transition);
     rewards_batch[n] = reward;
-    terminal[n] = !std::get<3>(transition);
+    terminal[n] = !std::get<4>(transition);
     if (!terminal[n]) {
       InputStates next_states;
       for (int i = 0; i < kStateInputCount - 1; ++i) {
         next_states[i] = std::get<0>(transition)[i + 1];
       }
-      next_states[kStateInputCount-1] = std::get<3>(transition).get();
+      next_states[kStateInputCount-1] = std::get<4>(transition).get();
       next_states_batch.push_back(next_states);
     }
   }
@@ -869,8 +888,10 @@ std::pair<float,float> DQN::UpdateActorCritic() {
           *critic_target_net_, *actor_target_net_, next_states_batch);
   int target_value_idx = 0;
   for (int n = 0; n < kMinibatchSize; ++n) {
-    float target = terminal[n] ? rewards_batch[n] :
+    float off_policy_target = terminal[n] ? rewards_batch[n] :
         rewards_batch[n] + gamma_ * target_q_values[target_value_idx++];
+    float on_policy_target = on_policy_targets[n];
+    float target = FLAGS_beta * on_policy_target + (1 - FLAGS_beta) * off_policy_target;
     CHECK(std::isfinite(target)) << "Target not finite!";
     target_input[target_blob->offset(n,0,0,0)] = target;
   }
@@ -1095,7 +1116,9 @@ void DQN::SnapshotReplayMemory(const std::string& filename) {
     out.write((char*)&actor_output, sizeof(ActorOutput));
     const float& reward = std::get<2>(t);
     out.write((char*)&reward, sizeof(float));
-    terminal = !std::get<3>(t);
+    const float& on_policy_target = std::get<3>(t);
+    out.write((char*)&on_policy_target, sizeof(float));
+    terminal = !std::get<4>(t);
     out.write((char*)&terminal, sizeof(bool));
     if (terminal) { episodes++; }
   }
@@ -1139,9 +1162,10 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     std::copy(past_states.begin(), past_states.end(), states.begin());
     in.read((char*)&std::get<1>(t), sizeof(ActorOutput));
     in.read((char*)&std::get<2>(t), sizeof(float));
-    std::get<3>(t) = boost::none;
+    in.read((char*)&std::get<3>(t), sizeof(float));
+    std::get<4>(t) = boost::none;
     if (i > 0 && !terminal) { // Set the next state for the last transition
-      std::get<3>(replay_memory_[i-1]) = state;
+      std::get<4>(replay_memory_[i-1]) = state;
     }
     in.read((char*)&terminal, sizeof(bool));
     if (terminal) { episodes++; };

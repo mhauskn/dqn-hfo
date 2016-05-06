@@ -29,7 +29,7 @@ using ActorOutput = std::array<float, kActionSize + kActionParamSize>;
 using StateData   = std::vector<float>;
 using StateDataSp = std::shared_ptr<StateData>;
 using InputStates = std::array<StateDataSp, kStateInputCount>;
-using Transition  = std::tuple<InputStates, ActorOutput,
+using Transition  = std::tuple<InputStates, ActorOutput, float,
                                float, boost::optional<StateDataSp>>;
 using SolverSp    = std::shared_ptr<caffe::Solver<float>>;
 using NetSp       = boost::shared_ptr<caffe::Net<float>>;
@@ -95,6 +95,9 @@ public:
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
   void AddTransitions(const std::vector<Transition>& transitions);
+
+  // Computes a tabular Q-Value for each transition
+  void LabelTransitions(std::vector<Transition>& transitions);
 
   // Update the model(s)
   void Update();

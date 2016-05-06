@@ -94,6 +94,7 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
                                                  dqn::DQN& dqn,
                                                  const double epsilon,
                                                  const bool update) {
+  std::vector<dqn::Transition> episode;
   HFOGameState game(dqn.unum());
   hfo.act(DASH, 0, 0);
   game.update(hfo);
@@ -129,11 +130,16 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
             = std::make_shared<dqn::StateData>(dqn.state_size());
         std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
         const auto transition = (game.status == IN_GAME) ?
-            dqn::Transition(input_states, actor_output, reward, next_state_sp):
-            dqn::Transition(input_states, actor_output, reward, boost::none);
-        dqn.AddTransition(transition);
+            dqn::Transition(input_states, actor_output, reward, 0, next_state_sp):
+            dqn::Transition(input_states, actor_output, reward, 0, boost::none);
+        episode.push_back(transition);
+        // dqn.AddTransition(transition);
       }
     }
+  }
+  if (update) {
+    dqn.LabelTransitions(episode);
+    dqn.AddTransitions(episode);
   }
   return std::make_tuple(game.total_reward, game.steps, game.status);
 }
