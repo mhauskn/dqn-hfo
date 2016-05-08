@@ -456,7 +456,7 @@ caffe::NetParameter CreateCriticNet(int state_size) {
 
 DQN::DQN(caffe::SolverParameter& actor_solver_param,
          caffe::SolverParameter& critic_solver_param,
-         std::string save_path, int state_size, int tid, int unum) :
+         std::string save_path, int state_size, int tid) :
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
@@ -469,7 +469,7 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         state_size_(state_size),
         state_input_data_size_(kMinibatchSize * state_size * kStateInputCount),
         tid_(tid),
-        unum_(unum) {
+        unum_(0) {
   if (FLAGS_seed <= 0) {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     LOG(INFO) << "Seeding RNG to time (seed = " << seed << ")";

@@ -57,7 +57,7 @@ class DQN {
 public:
   DQN(caffe::SolverParameter& actor_solver_param,
       caffe::SolverParameter& critic_solver_param,
-      std::string save_path, int state_size, int tid, int unum);
+      std::string save_path, int state_size, int tid);
   ~DQN();
 
   // Benchmark the speed of updates
@@ -119,6 +119,7 @@ public:
   int state_size() const { return state_size_; }
   const std::string& save_path() const { return save_path_; }
   int unum() const { return unum_; }
+  void set_unum(int unum) { unum_ = unum; }
 
 protected:
   // Initialize DQN. Called by the constructor

@@ -197,9 +197,8 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   return goal_percent;
 }
 
-void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
-  LOG(INFO) << "Thread " << tid << ", port=" << port << ", unum=" << unum
-            << ", save_prefix=" << save_prefix;
+void KeepPlayingGames(int tid, std::string save_prefix, int port) {
+  LOG(INFO) << "Thread " << tid << ", port=" << port << ", save_prefix=" << save_prefix;
   if (FLAGS_gpu) {
     caffe::Caffe::set_mode(caffe::Caffe::GPU);
   } else {
@@ -266,7 +265,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
   critic_solver_param.set_clip_gradients(FLAGS_clip_grad);
 
   dqn::DQN* dqn = new dqn::DQN(actor_solver_param, critic_solver_param,
-                               save_prefix, num_features, tid, unum);
+                               save_prefix, num_features, tid);
   // Load actor/critic/memory
   if (!GetArg(FLAGS_actor_snapshot, tid).empty()) {
     dqn->RestoreActorSolver(GetArg(FLAGS_actor_snapshot, tid));
@@ -284,6 +283,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port, int unum) {
 
   HFOEnvironment env;
   ConnectToServer(env, port);
+  dqn->set_unum(env.getUnum());
   if (FLAGS_evaluate) {
     Evaluate(env, *dqn, tid);
     return;
@@ -373,12 +373,9 @@ int main(int argc, char** argv) {
                             FLAGS_defense_agents + FLAGS_defense_dummies,
                             FLAGS_defense_npcs);
   std::thread player_threads[FLAGS_offense_agents + FLAGS_offense_dummies + FLAGS_defense_dummies];
-  std::vector<int> offense_unums = {11,7,8,9,10,6,3,2,4,5};
-  std::sort(offense_unums.begin(), offense_unums.begin() + FLAGS_offense_agents);
   for (int i=0; i<FLAGS_offense_agents; ++i) {
     std::string save_prefix = save_path.native() + "_agent" + std::to_string(i);
-    player_threads[i] = std::thread(KeepPlayingGames, i, save_prefix, port,
-                                    offense_unums[i]);
+    player_threads[i] = std::thread(KeepPlayingGames, i, save_prefix, port);
     sleep(10);
   }
   for (int i=0; i<FLAGS_offense_dummies; ++i) {
