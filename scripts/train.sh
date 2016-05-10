@@ -1,21 +1,50 @@
 #!/bin/bash
+set -e
 
-# set -e
-
-# 5-6-16 Debug testing with dummy teammate and dummy goalie
-values="0 1"
-for v in $values;
-do
-    JOB="refactorunum_$v"
-    SAVE="state/$JOB"
-    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 1 -offense_dummies 1 -defense_dummies 1`
-    ACTIVE="~/public_html/exp_vis/active/"$JOB
-    VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+# Function to monitor the running job.
+function monitor {
+    ACTIVE="~/public_html/exp_vis/active/"$1
+    VIS_CMD="./scripts/save.sh "$2"_INFO_* $ACTIVE"
     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
-    nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
-done
+    nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+}
+
+# 5-10-16 Return to 2v0 with annealed intrinsic rewards
+
+# 5-9-16 Testing annealing of intrinsic reward
+# ==== Naive annealing
+# JOB="naive_anneal"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 1 --zeta_explore 1000000`
+# monitor $JOB $SAVE $PID
+# ==== Extrinsic annealing
+# JOB="extrinsic_anneal"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 1 --zeta_explore 5000`
+# monitor $JOB $SAVE $PID
+# ==== Adaptive annealing
+# JOB="adaptive_anneal"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 1 --zeta_explore 50`
+# monitor $JOB $SAVE $PID
+
+# 5-6-16 Debug testing with dummy teammate and dummy goalie
+# RESULT: Passed after fixing the unum assignment
+# values="0 1"
+# for v in $values;
+# do
+#     JOB="refactorunum_$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 1 -offense_dummies 1 -defense_dummies 1`
+#     ACTIVE="~/public_html/exp_vis/active/"$JOB
+#     VIS_CMD="./scripts/save.sh "$SAVE"_INFO_* $ACTIVE"
+#     SUCCESS="mv $ACTIVE* ~/public_html/exp_vis/complete/"
+#     FAILURE="mv $ACTIVE* ~/public_html/exp_vis/failed/"
+#     EXIT_CMD="if grep termination $PREFIX.log | tail -1 | grep -q Normal; then $SUCCESS; else $FAILURE; fi;"
+#     nohup monitor-condor-job --pid=$PID --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
+# done
 
 # 3-31-16 Lets try this on 1v1!
 # values="0 .2 .5 .8 1"

@@ -99,7 +99,7 @@ Action GetRandomHFOAction(std::mt19937& random_engine) {
 HFOGameState::HFOGameState(int unum) :
     old_ball_prox(0), ball_prox_delta(0), old_kickable(0),
     kickable_delta(0), old_ball_dist_goal(0), ball_dist_goal_delta(0),
-    steps(0), total_reward(0), status(IN_GAME),
+    steps(0), total_reward(0), extrinsic_reward(0), status(IN_GAME),
     episode_over(false), got_kickable_reward(false), our_unum(unum) {
   VLOG(1) << "Creating new HFOGameState";
 }
@@ -154,11 +154,12 @@ void HFOGameState::update(HFOEnvironment& hfo) {
   steps++;
 }
 
-float HFOGameState::reward() {
-  float moveToBallReward = move_to_ball_reward();
-  float kickToGoalReward = 3. * kick_to_goal_reward();
+float HFOGameState::reward(float zeta) {
+  float moveToBallReward = zeta * move_to_ball_reward();
+  float kickToGoalReward = zeta * 3. * kick_to_goal_reward();
   float eotReward = EOT_reward();
   float reward = moveToBallReward + kickToGoalReward + eotReward;
+  extrinsic_reward += eotReward;
   total_reward += reward;
   VLOG(1) << "Overall_Reward: " << reward << " MTB: " << moveToBallReward
           << " KTG: " << kickToGoalReward << " EOT: " << eotReward;
