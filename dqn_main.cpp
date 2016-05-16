@@ -47,7 +47,8 @@ DEFINE_int32(evaluate_freq, 10000, "Frequency (steps) between evaluations");
 DEFINE_int32(repeat_games, 100, "Number of games played in evaluation mode");
 // Misc Args
 DEFINE_double(update_ratio, 0.1, "Ratio of new experiences to updates.");
-DEFINE_int32(zeta_explore, 300000, "Iterations for zeta to reach zero.");
+DEFINE_int32(zeta_explore, -1, "Anneal Intrinsic Rewards: Iterations for zeta to reach zero.");
+DEFINE_double(evaluate_with_zeta, 0, "Zeta value to be used in evaluation mode");
 // Game configuration
 DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
 DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
@@ -93,11 +94,11 @@ void little_sleep(std::chrono::microseconds us)
 /**
  * Play one episode and return the total score and number of steps
  */
-std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
-                                                 dqn::DQN& dqn,
-                                                 const double epsilon,
-                                                 const float zeta,
-                                                 const bool update) {
+std::tuple<double, int, status_t, double> PlayOneEpisode(HFOEnvironment& hfo,
+                                                         dqn::DQN& dqn,
+                                                         const double epsilon,
+                                                         const float zeta,
+                                                         const bool update) {
   std::vector<dqn::Transition> episode;
   HFOGameState game(dqn.unum());
   hfo.act(DASH, 0, 0);
@@ -145,7 +146,8 @@ std::tuple<double, int, status_t> PlayOneEpisode(HFOEnvironment& hfo,
     dqn.LabelTransitions(episode);
     dqn.AddTransitions(episode);
   }
-  return std::make_tuple(game.total_reward, game.steps, game.status);
+  return std::make_tuple(game.total_reward, game.steps, game.status,
+                         game.extrinsic_reward);
 }
 
 template <class T>
@@ -172,7 +174,8 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   std::vector<int> successful_trial_steps;
   int goals = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    auto result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon, 0, false);
+    auto result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon,
+                                 FLAGS_evaluate_with_zeta, false);
     double trial_reward = std::get<0>(result);
     int trial_steps = std::get<1>(result);
     status_t trial_status = std::get<2>(result);
@@ -291,7 +294,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
     return;
   }
   if (FLAGS_benchmark) {
-    PlayOneEpisode(env, *dqn, FLAGS_evaluate_with_epsilon, 0, true);
+    PlayOneEpisode(env, *dqn, FLAGS_evaluate_with_epsilon,
+                   FLAGS_evaluate_with_zeta, true);
     dqn->Benchmark(1000);
     return;
   }
@@ -306,7 +310,10 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
   double best_score = std::numeric_limits<double>::min();
   for (int episode = 0; dqn->max_iter() < FLAGS_max_iter; ++episode) {
     double epsilon = CalculateEpsilon(dqn->max_iter());
-    float zeta = 1 - std::min(1.f, dqn->max_iter() / float(FLAGS_zeta_explore));
+    float zeta = 1;
+    if (FLAGS_zeta_explore > 0) {
+      zeta = 1 - std::min(1., dqn->max_iter() / double(FLAGS_zeta_explore));
+    }
     auto result = PlayOneEpisode(env, *dqn, epsilon, zeta, true);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
               << " reward = " << std::get<0>(result);

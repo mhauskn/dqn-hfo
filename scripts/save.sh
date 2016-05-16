@@ -59,4 +59,4 @@ grep "Critic Iteration" $LOGS | lmj-plot -m '\[Agent0\] Critic Iteration (\d+), 
 grep "Actor Iteration" $LOGS | lmj-plot -m '\[Agent0\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' '\[Agent1\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' --num-x-ticks 8 --xlabel 'Iteration' --ylabel 'Actor Average Q-Value' --title $PREFIX -g -T --log y $MARKERS $LEGEND -c Pastel2 -o $SAVE"_avgq.png" &
 
 # Plot Zeta
-grep "Zeta" $LOGS | lmj-plot -m 'Zeta = (\S+)' --num-x-ticks 8 --xlabel 'Episode' --ylabel 'Zeta' --title $PREFIX -g -T $MARKERS $LEGEND -c Pastel1 -o $SAVE"_zeta.png" &
+# grep "Zeta" $LOGS | lmj-plot -m 'Zeta = (\S+)' --num-x-ticks 8 --xlabel 'Episode' --ylabel 'Zeta' --title $PREFIX -g -T $MARKERS $LEGEND -c Pastel1 -o $SAVE"_zeta.png" &

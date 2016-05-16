@@ -11,7 +11,49 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
+JOB="1v1"
+SAVE="state/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -defense_npcs 1 -ball_x_min 0.6 -offense_on_ball 1`
+monitor $JOB $SAVE $PID
+
+# 5-12-16 Combine the two independently learned agents together
+# ACTOR0="state/dummy_0_agent0_actor_iter_2720000.solverstate"
+# CRITIC0="state/dummy_0_agent0_critic_iter_2720000.solverstate"
+# ACTOR1="state/dummy_1_agent0_actor_iter_2730000.solverstate"
+# CRITIC1="state/dummy_1_agent0_critic_iter_2730000.solverstate"
+# JOB="2v0_pretrained"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --offense_on_ball=10 -defense_dummies 1 -actor_snapshot $ACTOR0,$ACTOR1 -critic_snapshot $CRITIC0,$CRITIC1 -zeta_explore 1`
+# monitor $JOB $SAVE $PID
+# JOB="2v1_pretrained"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --offense_on_ball=10 -defense_npcs 1 -actor_snapshot $ACTOR0,$ACTOR1 -critic_snapshot $CRITIC0,$CRITIC1 -zeta_explore 1`
+# monitor $JOB $SAVE $PID
+
 # 5-10-16 Return to 2v0 with annealed intrinsic rewards
+# JOB="2v0_joint"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --offense_on_ball=10`
+# monitor $JOB $SAVE $PID
+# # 5-10-16 Return to 2v1 with annealed intrinsic rewards
+# JOB="2v1_joint"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_npcs 1 --offense_on_ball=10`
+# monitor $JOB $SAVE $PID
+# # 5-10-16 Learning with a teammate using annealing
+# JOB="teammate"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 1 --offense_npcs 1 --offense_on_ball 2`
+# monitor $JOB $SAVE $PID
+# # 5-10-16 Individual training with dummy agents
+# values="0 1"
+# for v in $values;
+# do
+#     JOB="dummy_$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 1 -offense_dummies 1 -defense_dummies 1`
+#     monitor $JOB $SAVE $PID
+# done
 
 # 5-9-16 Testing annealing of intrinsic reward
 # ==== Naive annealing
