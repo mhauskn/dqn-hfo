@@ -11,10 +11,20 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
-JOB="1v1"
+
+# Train a 1v1 agent with an offensive dummy
+# JOB="1v1"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -beta 0.2 -offense_dummies 1 -defense_npcs 1 -ball_x_min 0.6 -offense_on_ball 1`
+# monitor $JOB $SAVE $PID
+
+ACTOR="state/1v1_agent0_HiScore0.800000_actor_iter_5920022.caffemodel"
+CRITIC="state/1v1_agent0_HiScore0.800000_critic_iter_5920022.caffemodel"
+JOB="pretrained_2v1"
 SAVE="state/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -defense_npcs 1 -ball_x_min 0.6 -offense_on_ball 1`
+PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --explore 1 --offense_agents 2 --ball_x_min 0.6 --offense_on_ball=10 -defense_npcs 1 -actor_weights $ACTOR,$ACTOR -critic_weights $CRITIC,$CRITIC`
 monitor $JOB $SAVE $PID
+
 
 # 5-12-16 Combine the two independently learned agents together
 # ACTOR0="state/dummy_0_agent0_actor_iter_2720000.solverstate"

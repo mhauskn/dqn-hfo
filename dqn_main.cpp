@@ -48,7 +48,7 @@ DEFINE_int32(repeat_games, 100, "Number of games played in evaluation mode");
 // Misc Args
 DEFINE_double(update_ratio, 0.1, "Ratio of new experiences to updates.");
 DEFINE_int32(zeta_explore, -1, "Anneal Intrinsic Rewards: Iterations for zeta to reach zero.");
-DEFINE_double(evaluate_with_zeta, 0, "Zeta value to be used in evaluation mode");
+DEFINE_double(evaluate_with_zeta, 1, "Zeta value to be used in evaluation mode");
 // Game configuration
 DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
 DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
