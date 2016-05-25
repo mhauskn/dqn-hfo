@@ -27,7 +27,7 @@ DEFINE_int32(memory_threshold, 1000, "Number of transitions required to start le
 DEFINE_int32(loss_display_iter, 1000, "Frequency of loss display");
 DEFINE_int32(snapshot_freq, 10000, "Frequency (steps) snapshots");
 DEFINE_bool(remove_old_snapshots, true, "Remove old snapshots when writing more recent ones.");
-DEFINE_bool(snapshot_memory, false, "Snapshot the replay memory along with the network.");
+DEFINE_bool(snapshot_memory, true, "Snapshot the replay memory along with the network.");
 DEFINE_double(beta, .5, "Mix between off-policy and on-policy updates.");
 
 template <typename Dtype>
@@ -1028,6 +1028,50 @@ void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {
     net_to.reset(new caffe::Net<float>(net_param));
   } else {
     net_to->CopyTrainedLayersFrom(net_param);
+  }
+}
+
+void DQN::ShareLayer(caffe::Layer<float>& param_owner,
+                     caffe::Layer<float>& param_slave) {
+  auto& owner_blobs = param_owner.blobs();
+  auto& slave_blobs = param_slave.blobs();
+  CHECK_EQ(owner_blobs.size(), slave_blobs.size());
+  for (int i=0; i<slave_blobs.size(); ++i) {
+    slave_blobs[i]->ShareData(*owner_blobs[i].get());
+    // slave_blobs[i].ShareDiff(owner_blobs[i]);
+  }
+}
+
+void DQN::ShareParameters(DQN& other,
+                          int num_actor_layers_to_share,
+                          int num_critic_layers_to_share) {
+  auto& actor_layers = actor_net_->layers();
+  auto& other_actor_layers = other.actor_net_->layers();
+  auto& critic_layers = critic_net_->layers();
+  auto& other_critic_layers = other.critic_net_->layers();
+  auto& actor_target_layers = actor_target_net_->layers();
+  auto& other_actor_target_layers = other.actor_target_net_->layers();
+  auto& critic_target_layers = critic_target_net_->layers();
+  auto& other_critic_target_layers = other.critic_target_net_->layers();
+  int shared_layers = 0;
+  for (int i=0; shared_layers < num_actor_layers_to_share; ++i) {
+    CHECK_LT(i, actor_layers.size());
+    if (actor_layers[i]->blobs().size() > 0) {
+      LOG(INFO) << "Sharing Actor Layer " << actor_layers[i]->layer_param().name();
+      ShareLayer(*actor_layers[i].get(), *other_actor_layers[i].get());
+      ShareLayer(*actor_target_layers[i].get(), *other_actor_target_layers[i].get());
+      shared_layers++;
+    }
+  }
+  shared_layers = 0;
+  for (int i=0; shared_layers < num_critic_layers_to_share; ++i) {
+    CHECK_LT(i, critic_layers.size());
+    if (critic_layers[i]->blobs().size() > 0) {
+      LOG(INFO) << "Sharing Critic Layer " << critic_layers[i]->layer_param().name();
+      ShareLayer(*critic_layers[i].get(), *other_critic_layers[i].get());
+      ShareLayer(*critic_target_layers[i].get(), *other_critic_target_layers[i].get());
+      shared_layers++;
+    }
   }
 }
 

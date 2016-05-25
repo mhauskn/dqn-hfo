@@ -49,6 +49,8 @@ DEFINE_int32(repeat_games, 100, "Number of games played in evaluation mode");
 DEFINE_double(update_ratio, 0.1, "Ratio of new experiences to updates.");
 DEFINE_int32(zeta_explore, -1, "Anneal Intrinsic Rewards: Iterations for zeta to reach zero.");
 DEFINE_double(evaluate_with_zeta, 1, "Zeta value to be used in evaluation mode");
+DEFINE_int32(share_actor_layers, 0, "Share layers between actor networks.");
+DEFINE_int32(share_critic_layers, 0, "Share layers between critic networks.");
 // Game configuration
 DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
 DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
@@ -59,7 +61,7 @@ DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
 
 // Global Variables Shared Between Threads
 int UPDATES_TO_DO = -1; // How many updates to perform after each episode
-
+dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -289,6 +291,33 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
   HFOEnvironment env;
   ConnectToServer(env, port);
   dqn->set_unum(env.getUnum());
+
+  // Wait for all DQNs to connect and be ready
+  DQNS[tid] = dqn;
+  int target_id = tid == 0 ? 1 : 0;
+  bool all_dqns_ready = false;
+  while (!all_dqns_ready) {
+    little_sleep(std::chrono::microseconds(100));
+    all_dqns_ready = true;
+    for (int i=0; i<FLAGS_offense_agents; ++i) {
+      if (DQNS[i] == NULL) {
+        all_dqns_ready = false;
+      }
+    }
+  }
+  // TID 0 is the Master and will do the sharing
+  if (tid == 0) {
+    if (FLAGS_share_actor_layers > 0 || FLAGS_share_critic_layers > 0) {
+      for (int i=1; i<FLAGS_offense_agents; ++i) {
+        dqn::DQN* teammate = DQNS[i];
+        CHECK_NOTNULL(teammate);
+        dqn->ShareParameters(*teammate,
+                             FLAGS_share_actor_layers,
+                             FLAGS_share_critic_layers);
+      }
+    }
+  }
+
   if (FLAGS_evaluate) {
     Evaluate(env, *dqn, tid);
     return;
@@ -375,6 +404,9 @@ int main(int argc, char** argv) {
   google::SetLogDestination(google::GLOG_WARNING, (save_path.native() + "_WARNING_").c_str());
   google::SetLogDestination(google::GLOG_ERROR, (save_path.native() + "_ERROR_").c_str());
   google::SetLogDestination(google::GLOG_FATAL, (save_path.native() + "_FATAL_").c_str());
+  for (int i=0; i<12; ++i) { // Make the global pointers all null
+    DQNS[i] = NULL;
+  }
   srand(std::hash<std::string>()(save_path.native()));
   int port = rand() % 40000 + 20000;
   std::thread server_thread(StartHFOServer, port,
@@ -400,4 +432,5 @@ int main(int argc, char** argv) {
     player_threads[i].join();
   }
   StopHFOServer();
+  server_thread.join();
 };

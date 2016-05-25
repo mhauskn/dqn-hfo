@@ -111,6 +111,16 @@ public:
   // Get the current size of the replay memory
   int memory_size() const { return replay_memory_.size(); }
 
+  // Share the parameters in a layer. Owner keeps the params, slave loses them
+  void ShareLayer(caffe::Layer<float>& param_owner,
+                  caffe::Layer<float>& param_slave);
+
+  // Share parameters between DQNs
+  void ShareParameters(DQN& other,
+                       int num_actor_layers_to_share,
+                       int num_critic_layers_to_share);
+
+
   // Return the current iteration of the solvers
   int min_iter() const { return std::min(actor_iter(), critic_iter()); }
   int max_iter() const { return std::max(actor_iter(), critic_iter()); }
