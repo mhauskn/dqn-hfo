@@ -11,16 +11,21 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
+# 5-25-16 Train 2v0 with shared replay memory
+JOB="sharedreplay_2v0"
+SAVE="state/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -offense_agents 2 -offense_on_ball=10 -share_replay_memory`
+monitor $JOB $SAVE $PID
 
 # 5-24-16 Weight Sharing Experiment
-values="1 2 3 4"
-for v in $values;
-do
-    JOB="shareparam_2v0_$v"
-    SAVE="state/$JOB"
-    PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -beta 0.2 -offense_agents 2 -offense_on_ball 10 -share_actor_layers $v -share_critic_layers $v`
-    monitor $JOB $SAVE $PID
-done
+# values="1 2 3 4"
+# for v in $values;
+# do
+#     JOB="shareparam_2v0_$v"
+#     SAVE="state/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -beta 0.2 -offense_agents 2 -offense_on_ball 10 -share_actor_layers $v -share_critic_layers $v`
+#     monitor $JOB $SAVE $PID
+# done
 
 # Train a 1v1 agent with an offensive dummy
 # JOB="1v1"

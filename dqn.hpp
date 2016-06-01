@@ -103,13 +103,13 @@ public:
   void Update();
 
   // Clear the replay memory
-  void ClearReplayMemory() { replay_memory_.clear(); }
+  void ClearReplayMemory() { replay_memory_->clear(); }
 
   // Save the replay memory to a gzipped compressed file
   void SnapshotReplayMemory(const std::string& filename);
 
   // Get the current size of the replay memory
-  int memory_size() const { return replay_memory_.size(); }
+  int memory_size() const { return replay_memory_->size(); }
 
   // Share the parameters in a layer. Owner keeps the params, slave loses them
   void ShareLayer(caffe::Layer<float>& param_owner,
@@ -120,6 +120,8 @@ public:
                        int num_actor_layers_to_share,
                        int num_critic_layers_to_share);
 
+  // Free's the replay memory of other, which now points to our own replay mem
+  void ShareReplayMemory(DQN& other);
 
   // Return the current iteration of the solvers
   int min_iter() const { return std::min(actor_iter(), critic_iter()); }
@@ -182,7 +184,7 @@ protected:
   caffe::SolverParameter critic_solver_param_;
   const int replay_memory_capacity_;
   const double gamma_;
-  std::deque<Transition> replay_memory_;
+  std::shared_ptr<std::deque<Transition> > replay_memory_;
   SolverSp actor_solver_;
   NetSp actor_net_; // The actor network used for continuous action evaluation.
   SolverSp critic_solver_;

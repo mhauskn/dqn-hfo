@@ -460,6 +460,7 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
+        replay_memory_(new std::deque<Transition>),
         gamma_(FLAGS_gamma),
         random_engine(),
         smoothed_critic_loss_(0),
@@ -501,7 +502,7 @@ std::vector<int> DQN::SampleTransitionsFromMemory(int n) {
   std::vector<int> transitions(n);
   for (int i = 0; i < n; ++i) {
     transitions[i] =
-        std::uniform_int_distribution<int>(0, replay_memory_.size() - 1)(
+        std::uniform_int_distribution<int>(0, replay_memory_->size() - 1)(
             random_engine);
   }
   return transitions;
@@ -511,7 +512,7 @@ std::vector<InputStates> DQN::SampleStatesFromMemory(int n) {
   std::vector<InputStates> states_batch(n);
   std::vector<int> transitions = SampleTransitionsFromMemory(n);
   for (int i = 0; i < n; ++i) {
-    const auto& transition = replay_memory_[transitions[i]];
+    const auto& transition = (*replay_memory_)[transitions[i]];
     InputStates last_states;
     for (int j = 0; j < kStateInputCount; ++j) {
       last_states[j] = std::get<0>(transition)[j];
@@ -543,6 +544,7 @@ void DQN::RestoreActorSolver(const std::string& actor_solver) {
   LOG(INFO) << "Actor solver state resuming from " << actor_solver;
   actor_solver_->Restore(actor_solver.c_str());
   CloneNet(actor_net_, actor_target_net_);
+  last_snapshot_iter_ = max_iter();
 }
 
 void DQN::RestoreCriticSolver(const std::string& critic_solver) {
@@ -551,6 +553,7 @@ void DQN::RestoreCriticSolver(const std::string& critic_solver) {
   LOG(INFO) << "Critic solver state resuming from " << critic_solver;
   critic_solver_->Restore(critic_solver.c_str());
   CloneNet(critic_net_, critic_target_net_);
+  last_snapshot_iter_ = max_iter();
 }
 
 std::vector<std::string> FilesMatchingRegexp(const std::string& regexp) {
@@ -763,18 +766,18 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
 }
 
 void DQN::AddTransition(const Transition& transition) {
-  if (replay_memory_.size() == replay_memory_capacity_) {
-    replay_memory_.pop_front();
+  if (replay_memory_->size() == replay_memory_capacity_) {
+    replay_memory_->pop_front();
   }
-  replay_memory_.push_back(transition);
+  replay_memory_->push_back(transition);
 }
 
 void DQN::AddTransitions(const std::vector<Transition>& transitions) {
-  while (replay_memory_.size() + transitions.size() >= replay_memory_capacity_) {
-    replay_memory_.pop_front();
+  while (replay_memory_->size() + transitions.size() >= replay_memory_capacity_) {
+    replay_memory_->pop_front();
   }
-  std::deque<Transition>::iterator it = replay_memory_.end();
-  replay_memory_.insert(it, transitions.begin(), transitions.end());
+  std::deque<Transition>::iterator it = replay_memory_->end();
+  replay_memory_->insert(it, transitions.begin(), transitions.end());
 }
 
 void DQN::LabelTransitions(std::vector<Transition>& transitions) {
@@ -854,7 +857,7 @@ std::pair<float,float> DQN::UpdateActorCritic() {
   std::vector<float> action_params_input(kActionParamsInputDataSize, 0.0f);
   std::vector<float> target_input(kTargetInputDataSize, 0.0f);
   for (int n = 0; n < kMinibatchSize; ++n) {
-    const auto& transition = replay_memory_[transitions[n]];
+    const auto& transition = (*replay_memory_)[transitions[n]];
     InputStates last_states;
     for (int c = 0; c < kStateInputCount; ++c) {
       const auto& state_data = std::get<0>(transition)[c];
@@ -1075,6 +1078,10 @@ void DQN::ShareParameters(DQN& other,
   }
 }
 
+void DQN::ShareReplayMemory(DQN& other) {
+  other.replay_memory_ = replay_memory_;
+}
+
 void DQN::SoftUpdateNet(NetSp& net_from, NetSp& net_to, float tau) {
   // TODO: Test if learnable_params() is sufficient for soft update
   const auto& from_params = net_from->params();
@@ -1146,7 +1153,7 @@ void DQN::SnapshotReplayMemory(const std::string& filename) {
   out.write((char*)&num_transitions, sizeof(int));
   int episodes = 0;
   bool terminal = true;
-  for (const Transition& t : replay_memory_) {
+  for (const Transition& t : (*replay_memory_)) {
     const InputStates& states = std::get<0>(t);
     if (terminal) { // Save the history of states
       for (int i = 0; i < kStateInputCount - 1; ++i) {
@@ -1181,12 +1188,12 @@ void DQN::LoadReplayMemory(const std::string& filename) {
   in.push(ifile);
   int num_transitions;
   in.read((char*)&num_transitions, sizeof(int));
-  replay_memory_.resize(num_transitions);
+  replay_memory_->resize(num_transitions);
   std::deque<dqn::StateDataSp> past_states;
   int episodes = 0;
   bool terminal = true;
   for (int i = 0; i < num_transitions; ++i) {
-    Transition& t = replay_memory_[i];
+    Transition& t = (*replay_memory_)[i];
     if (terminal) {
       past_states.clear();
       for (int i = 0; i < kStateInputCount - 1; ++i) {
@@ -1209,7 +1216,7 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     in.read((char*)&std::get<3>(t), sizeof(float));
     std::get<4>(t) = boost::none;
     if (i > 0 && !terminal) { // Set the next state for the last transition
-      std::get<4>(replay_memory_[i-1]) = state;
+      std::get<4>((*replay_memory_)[i-1]) = state;
     }
     in.read((char*)&terminal, sizeof(bool));
     if (terminal) { episodes++; };

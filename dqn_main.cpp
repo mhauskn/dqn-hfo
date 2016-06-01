@@ -49,8 +49,10 @@ DEFINE_int32(repeat_games, 100, "Number of games played in evaluation mode");
 DEFINE_double(update_ratio, 0.1, "Ratio of new experiences to updates.");
 DEFINE_int32(zeta_explore, -1, "Anneal Intrinsic Rewards: Iterations for zeta to reach zero.");
 DEFINE_double(evaluate_with_zeta, 1, "Zeta value to be used in evaluation mode");
+// Sharing
 DEFINE_int32(share_actor_layers, 0, "Share layers between actor networks.");
 DEFINE_int32(share_critic_layers, 0, "Share layers between critic networks.");
+DEFINE_bool(share_replay_memory, false, "Shares replay memory between agents.");
 // Game configuration
 DEFINE_int32(offense_agents, 1, "Number of agents playing offense");
 DEFINE_int32(offense_npcs, 0, "Number of npcs playing offense");
@@ -62,6 +64,7 @@ DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
 // Global Variables Shared Between Threads
 int UPDATES_TO_DO = -1; // How many updates to perform after each episode
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
+std::mutex MTX;
 
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
@@ -145,8 +148,10 @@ std::tuple<double, int, status_t, double> PlayOneEpisode(HFOEnvironment& hfo,
     }
   }
   if (update) {
+    if (FLAGS_share_replay_memory) { MTX.lock(); }
     dqn.LabelTransitions(episode);
     dqn.AddTransitions(episode);
+    if (FLAGS_share_replay_memory) { MTX.unlock(); }
   }
   return std::make_tuple(game.total_reward, game.steps, game.status,
                          game.extrinsic_reward);
@@ -219,15 +224,17 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
   LOG(INFO) << "Found Resumable(s): [" << resume_path << "] "
             << last_actor_snapshot << ", " << last_critic_snapshot
             << ", " << last_memory_snapshot;
-  if (FLAGS_critic_snapshot.empty() && FLAGS_critic_weights.empty()) {
-    FLAGS_critic_snapshot = last_critic_snapshot;
-  }
-  if (FLAGS_actor_snapshot.empty() && FLAGS_actor_weights.empty()) {
-    FLAGS_actor_snapshot = last_actor_snapshot;
-  }
-  if (FLAGS_memory_snapshot.empty()) {
-    FLAGS_memory_snapshot = last_memory_snapshot;
-  }
+  // if (GetArg(FLAGS_critic_snapshot, tid).empty() &&
+  //     GetArg(FLAGS_critic_weights, tid).empty()) {
+  //   FLAGS_critic_snapshot = last_critic_snapshot;
+  // }
+  // if (GetArg(FLAGS_actor_snapshot, tid).empty() &&
+  //     GetArg(FLAGS_actor_weights, tid).empty()) {
+  //   FLAGS_actor_snapshot = last_actor_snapshot;
+  // }
+  // if (FLAGS_memory_snapshot.empty()) {
+  //   FLAGS_memory_snapshot = last_memory_snapshot;
+  // }
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
@@ -273,18 +280,25 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
 
   dqn::DQN* dqn = new dqn::DQN(actor_solver_param, critic_solver_param,
                                save_prefix, num_features, tid);
-  // Load actor/critic/memory
-  if (!GetArg(FLAGS_actor_snapshot, tid).empty()) {
+  // Load actor/critic/memory. Try to load from resumables
+  // first. Otherwise load from the args.
+  if (!last_actor_snapshot.empty()) {
+    dqn->RestoreActorSolver(last_actor_snapshot);
+  } else if (!GetArg(FLAGS_actor_snapshot, tid).empty()) {
     dqn->RestoreActorSolver(GetArg(FLAGS_actor_snapshot, tid));
   } else if (!GetArg(FLAGS_actor_weights, tid).empty()) {
     dqn->LoadActorWeights(GetArg(FLAGS_actor_weights, tid));
   }
-  if (!GetArg(FLAGS_critic_snapshot, tid).empty()) {
+  if (!last_critic_snapshot.empty()) {
+    dqn->RestoreCriticSolver(last_critic_snapshot);
+  } else if (!GetArg(FLAGS_critic_snapshot, tid).empty()) {
     dqn->RestoreCriticSolver(GetArg(FLAGS_critic_snapshot, tid));
   } else if (!GetArg(FLAGS_critic_weights, tid).empty()) {
     dqn->LoadCriticWeights(GetArg(FLAGS_critic_weights, 0));
   }
-  if (!GetArg(FLAGS_memory_snapshot, tid).empty()) {
+  if (!last_memory_snapshot.empty()) {
+    dqn->LoadReplayMemory(last_memory_snapshot);
+  } else if (!GetArg(FLAGS_memory_snapshot, tid).empty()) {
     dqn->LoadReplayMemory(GetArg(FLAGS_memory_snapshot, tid));
   }
 
@@ -314,6 +328,13 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
         dqn->ShareParameters(*teammate,
                              FLAGS_share_actor_layers,
                              FLAGS_share_critic_layers);
+      }
+    }
+    if (FLAGS_share_replay_memory) {
+      for (int i=1; i<FLAGS_offense_agents; ++i) {
+        dqn::DQN* teammate = DQNS[i];
+        CHECK_NOTNULL(teammate);
+        dqn->ShareReplayMemory(*teammate);
       }
     }
   }
@@ -357,9 +378,11 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
       n_updates = UPDATES_TO_DO;
       UPDATES_TO_DO = -1;
     }
+    if (FLAGS_share_replay_memory) { MTX.lock(); }
     for (int i=0; i<n_updates; ++i) {
       dqn->Update();
     }
+    if (FLAGS_share_replay_memory) { MTX.unlock(); }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
       double avg_score = Evaluate(env, *dqn, tid);
       if (avg_score > best_score) {
