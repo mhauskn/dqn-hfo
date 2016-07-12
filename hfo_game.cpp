@@ -18,6 +18,7 @@ DEFINE_string(record_dir, "", "Directory to record states,actions,rewards.");
 DEFINE_double(ball_x_min, 0, "Ball X-Position initialization minimum.");
 DEFINE_double(ball_x_max, 0.2, "Ball X-Position initialization maximum.");
 DEFINE_int32(offense_on_ball, 0, "Offensive player to give the ball to.");
+DEFINE_bool(verbose, false, "Server prints verbose output.");
 
 void StartHFOServer(int port, int offense_agents, int offense_npcs,
                     int defense_agents, int defense_npcs) {
@@ -31,6 +32,7 @@ void StartHFOServer(int port, int offense_agents, int offense_npcs,
       + " --offense-on-ball " + std::to_string(FLAGS_offense_on_ball);
   if (!FLAGS_gui) { cmd += " --headless"; }
   if (!FLAGS_log_game) { cmd += " --no-logging"; }
+  if (FLAGS_verbose) { cmd += " --verbose"; }
   LOG(INFO) << "Starting server with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start the HFO server.";
   sleep(10);
@@ -48,6 +50,15 @@ void StartDummyGoalie(int port) {
   std::string cmd = "./hfo_policies/dummy_goalie " + std::to_string(port);
   cmd += " > /dev/null";
   LOG(INFO) << "Starting dummy goalie with command: " << cmd;
+  CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start dummy goalie.";
+  sleep(5);
+}
+
+void StartChaser(int port, std::string team_name, bool goalie) {
+  std::string cmd = "./hfo_policies/chaser " + std::to_string(port)
+      + " " + team_name + " " + std::to_string(goalie);
+  cmd += " > /dev/null";
+  LOG(INFO) << "Starting chaser with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start dummy goalie.";
   sleep(5);
 }
@@ -100,7 +111,8 @@ HFOGameState::HFOGameState(int unum) :
     old_ball_prox(0), ball_prox_delta(0), old_kickable(0),
     kickable_delta(0), old_ball_dist_goal(0), ball_dist_goal_delta(0),
     steps(0), total_reward(0), extrinsic_reward(0), status(IN_GAME),
-    episode_over(false), got_kickable_reward(false), our_unum(unum) {
+    episode_over(false), got_kickable_reward(false), our_unum(unum),
+    pass_active(false) {
   VLOG(1) << "Creating new HFOGameState";
 }
 
@@ -136,6 +148,12 @@ void HFOGameState::update(HFOEnvironment& hfo) {
   float ball_dist_goal = sqrt(ball_dist*ball_dist + goal_dist*goal_dist -
                               2.*ball_dist*goal_dist*cos(alpha));
   VLOG(1) << "BallProx: " << ball_proximity << " BallDistGoal: " << ball_dist_goal;
+  // Passing update
+  float ball_vel_valid = current_state[54];
+  float ball_vel = current_state[55];
+  if (ball_vel_valid && ball_vel > kPassVelThreshold) {
+    pass_active = true;
+  }
   if (steps > 0) {
     ball_prox_delta = ball_proximity - old_ball_prox;
     kickable_delta = kickable - old_kickable;
@@ -149,6 +167,7 @@ void HFOGameState::update(HFOEnvironment& hfo) {
     kickable_delta = 0;
     ball_dist_goal_delta = 0;
   }
+  old_player_on_ball = player_on_ball;
   player_on_ball = hfo.playerOnBall();
   VLOG(1) << "Player On Ball: " << player_on_ball.unum;
   steps++;
@@ -157,6 +176,7 @@ void HFOGameState::update(HFOEnvironment& hfo) {
 float HFOGameState::reward(float zeta) {
   float moveToBallReward = zeta * move_to_ball_reward();
   float kickToGoalReward = zeta * 3. * kick_to_goal_reward();
+  float passReward = zeta * 3. * pass_reward();
   float eotReward = EOT_reward();
   float reward = moveToBallReward + kickToGoalReward + eotReward;
   extrinsic_reward += eotReward;
@@ -192,7 +212,8 @@ float HFOGameState::kick_to_goal_reward() {
 
 float HFOGameState::EOT_reward() {
   if (status == GOAL) {
-    CHECK(player_on_ball.side == LEFT) << "Goal scored by defense?";
+    CHECK(old_player_on_ball.side == LEFT) << "Unexpected side: "
+                                           << old_player_on_ball.side;
     if (player_on_ball.unum == our_unum) {
       VLOG(1) << "We Scored!";
       return 5;
@@ -202,6 +223,14 @@ float HFOGameState::EOT_reward() {
     }
   } else if (status == CAPTURED_BY_DEFENSE) {
     return 0;
+  }
+  return 0;
+}
+
+float HFOGameState::pass_reward() {
+  if (pass_active && player_on_ball.unum != old_player_on_ball.unum) {
+    pass_active = false;
+    return 1;
   }
   return 0;
 }

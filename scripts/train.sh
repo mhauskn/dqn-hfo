@@ -11,11 +11,54 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
-# 5-25-16 Train 2v0 with shared replay memory
-JOB="sharedreplay_2v0"
-SAVE="state/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -offense_agents 2 -offense_on_ball=10 -share_replay_memory`
+# 7-9-16 Train against a defense chaser
+JOB="Chaser_2v0"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_chasers 1`
 monitor $JOB $SAVE $PID
+
+# 7-9-16 Try pass reward
+# JOB="PassReward_2v0"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2`
+# monitor $JOB $SAVE $PID
+
+# JOB="PassReward_2v0_share2layers"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 -share_actor_layers 2 -share_critic_layers 2`
+# monitor $JOB $SAVE $PID
+
+# JOB="PassReward_2v1"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_npcs 1`
+# monitor $JOB $SAVE $PID
+
+# JOB="PassReward_2v1_share2layers"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_npcs 1 -share_actor_layers 2 -share_critic_layers 2`
+# monitor $JOB $SAVE $PID
+
+# 6-1-16 Train 2v1 with shared replay memory
+# JOB="sharedreplay_2v1"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -offense_agents 2 -defense_npcs 1 -offense_on_ball 10 -ball_x_min 0.6 -share_replay_memory -verbose`
+# monitor $JOB $SAVE $PID
+
+# 6-1-16 Train weight sharing on 2v1
+# values="1 2 3 4"
+# for v in $values;
+# do
+#     JOB="shareparam_2v1_$v"
+#     SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -beta 0.2 -offense_agents 2 -defense_npcs 1 -offense_on_ball 10 -ball_x_min 0.6 -share_actor_layers $v -share_critic_layers $v -verbose`
+#     monitor $JOB $SAVE $PID
+# done
+
+# 5-25-16 Train 2v0 with shared replay memory
+# JOB="sharedreplay_2v0"
+# SAVE="state/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE -offense_agents 2 -share_replay_memory`
+# monitor $JOB $SAVE $PID
 
 # 5-24-16 Weight Sharing Experiment
 # values="1 2 3 4"

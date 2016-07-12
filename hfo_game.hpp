@@ -11,10 +11,11 @@ struct Action {
 };
 
 const
-inline int NumStateFeatures(int offense_agents, int offense_npcs,
-                            int defense_agents, int defense_npcs) {
-  return 50 + 8 * (offense_agents + defense_npcs + offense_npcs + defense_agents);
+inline int NumStateFeatures(int num_players) {
+  return 50 + 8 * (num_players);
 }
+
+constexpr auto kPassVelThreshold = -.5;
 
 // Starts the RCSSSERVER
 void StartHFOServer(int port, int offense_agents, int offense_npcs,
@@ -22,6 +23,7 @@ void StartHFOServer(int port, int offense_agents, int offense_npcs,
 
 void StartDummyTeammate(int port);
 void StartDummyGoalie(int port);
+void StartChaser(int port, std::string team_name, bool goalie);
 
 void StopHFOServer();
 
@@ -40,6 +42,7 @@ class HFOGameState {
   float move_to_ball_reward();
   float kick_to_goal_reward();
   float EOT_reward();
+  float pass_reward();
 
  public:
   float old_ball_prox, ball_prox_delta;
@@ -51,8 +54,9 @@ class HFOGameState {
   hfo::status_t status;
   bool episode_over;
   bool got_kickable_reward;
-  hfo::Player player_on_ball;
+  hfo::Player old_player_on_ball, player_on_ball;
   int our_unum;
+  bool pass_active;
 };
 
 #endif /* HFO_GAME_HPP_ */

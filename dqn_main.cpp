@@ -60,9 +60,9 @@ DEFINE_int32(defense_agents, 0, "Number of agents playing defense");
 DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 DEFINE_int32(offense_dummies, 0, "Number of dummy npcs playing offense");
 DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
+DEFINE_int32(defense_chasers, 0, "Number of chasers playing defense");
 
 // Global Variables Shared Between Threads
-int UPDATES_TO_DO = -1; // How many updates to perform after each episode
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
 std::mutex MTX;
 
@@ -103,11 +103,13 @@ std::tuple<double, int, status_t, double> PlayOneEpisode(HFOEnvironment& hfo,
                                                          dqn::DQN& dqn,
                                                          const double epsilon,
                                                          const float zeta,
-                                                         const bool update) {
+                                                         const bool update,
+                                                         const int tid) {
   std::vector<dqn::Transition> episode;
   HFOGameState game(dqn.unum());
   hfo.act(DASH, 0, 0);
   game.update(hfo);
+  CHECK(!game.episode_over) << "Episode should not be over at beginning!";
   std::deque<dqn::StateDataSp> past_states;
   while (!game.episode_over) {
     const std::vector<float>& current_state = hfo.getState();
@@ -182,7 +184,7 @@ double Evaluate(HFOEnvironment& hfo, dqn::DQN& dqn, int tid) {
   int goals = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
     auto result = PlayOneEpisode(hfo, dqn, FLAGS_evaluate_with_epsilon,
-                                 FLAGS_evaluate_with_zeta, false);
+                                 FLAGS_evaluate_with_zeta, false, tid);
     double trial_reward = std::get<0>(result);
     int trial_steps = std::get<1>(result);
     status_t trial_status = std::get<2>(result);
@@ -238,10 +240,10 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
-  int num_features = NumStateFeatures(FLAGS_offense_agents,
-                                      FLAGS_offense_npcs + FLAGS_offense_dummies,
-                                      FLAGS_defense_agents,
-                                      FLAGS_defense_npcs + FLAGS_defense_dummies);
+  int num_players = FLAGS_offense_agents + FLAGS_offense_npcs
+      + FLAGS_offense_dummies + FLAGS_defense_agents + FLAGS_defense_npcs
+      + FLAGS_defense_dummies + FLAGS_defense_chasers;
+  int num_features = NumStateFeatures(num_players);
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
@@ -345,7 +347,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
   }
   if (FLAGS_benchmark) {
     PlayOneEpisode(env, *dqn, FLAGS_evaluate_with_epsilon,
-                   FLAGS_evaluate_with_zeta, true);
+                   FLAGS_evaluate_with_zeta, true, tid);
     dqn->Benchmark(1000);
     return;
   }
@@ -364,20 +366,11 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
     if (FLAGS_zeta_explore > 0) {
       zeta = 1 - std::min(1., dqn->max_iter() / double(FLAGS_zeta_explore));
     }
-    auto result = PlayOneEpisode(env, *dqn, epsilon, zeta, true);
+    auto result = PlayOneEpisode(env, *dqn, epsilon, zeta, true, tid);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
               << " reward = " << std::get<0>(result);
     int steps = std::get<1>(result);
     int n_updates = int(steps * FLAGS_update_ratio);
-    if (tid == 0) {
-      UPDATES_TO_DO = n_updates;
-    } else {
-      while (UPDATES_TO_DO < 0) {
-        little_sleep(std::chrono::microseconds(100));
-      }
-      n_updates = UPDATES_TO_DO;
-      UPDATES_TO_DO = -1;
-    }
     if (FLAGS_share_replay_memory) { MTX.lock(); }
     for (int i=0; i<n_updates; ++i) {
       dqn->Update();
@@ -432,26 +425,29 @@ int main(int argc, char** argv) {
   }
   srand(std::hash<std::string>()(save_path.native()));
   int port = rand() % 40000 + 20000;
-  std::thread server_thread(StartHFOServer, port,
-                            FLAGS_offense_agents + FLAGS_offense_dummies,
-                            FLAGS_offense_npcs,
-                            FLAGS_defense_agents + FLAGS_defense_dummies,
-                            FLAGS_defense_npcs);
-  std::thread player_threads[FLAGS_offense_agents + FLAGS_offense_dummies + FLAGS_defense_dummies];
+  std::thread server_thread(
+      StartHFOServer, port, FLAGS_offense_agents + FLAGS_offense_dummies,
+      FLAGS_offense_npcs,
+      FLAGS_defense_agents + FLAGS_defense_dummies + FLAGS_defense_chasers,
+      FLAGS_defense_npcs);
+  std::thread player_threads[10];
+  int threadNum = 0;
   for (int i=0; i<FLAGS_offense_agents; ++i) {
     std::string save_prefix = save_path.native() + "_agent" + std::to_string(i);
-    player_threads[i] = std::thread(KeepPlayingGames, i, save_prefix, port);
+    player_threads[threadNum++] = std::thread(KeepPlayingGames, i, save_prefix, port);
     sleep(10);
   }
   for (int i=0; i<FLAGS_offense_dummies; ++i) {
-    player_threads[FLAGS_offense_agents + i] =
-        std::thread(StartDummyTeammate, port);
+    player_threads[threadNum++] = std::thread(StartDummyTeammate, port);
   }
   for (int i=0; i<FLAGS_defense_dummies; ++i) {
-    player_threads[FLAGS_offense_agents + FLAGS_offense_dummies + i] =
-        std::thread(StartDummyGoalie, port);
+    player_threads[threadNum++] = std::thread(StartDummyGoalie, port);
   }
-  for (int i = 0; i < FLAGS_offense_agents; ++i) {
+  for (int i=0; i<FLAGS_defense_chasers; ++i) {
+    player_threads[threadNum++] = std::thread(StartChaser, port, "base_right",
+                                              i == 0 ? 1 : 0);
+  }
+  for (int i = 0; i < threadNum; ++i) {
     player_threads[i].join();
   }
   StopHFOServer();
