@@ -38,7 +38,7 @@ void StartHFOServer(int port, int offense_agents, int offense_npcs,
 }
 
 void StartDummyTeammate(int port) {
-  std::string cmd = "./hfo_policies/dummy_teammate " + std::to_string(port);
+  std::string cmd = "./bin/dummy_teammate " + std::to_string(port);
   cmd += " > /dev/null";
   LOG(INFO) << "Starting dummy teammate with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start dummy teammate.";
@@ -46,7 +46,7 @@ void StartDummyTeammate(int port) {
 }
 
 void StartDummyGoalie(int port) {
-  std::string cmd = "./hfo_policies/dummy_goalie " + std::to_string(port);
+  std::string cmd = "./bin/dummy_goalie " + std::to_string(port);
   cmd += " > /dev/null";
   LOG(INFO) << "Starting dummy goalie with command: " << cmd;
   CHECK_EQ(system(cmd.c_str()), 0) << "Unable to start dummy goalie.";
@@ -54,7 +54,7 @@ void StartDummyGoalie(int port) {
 }
 
 void StartChaser(int port, std::string team_name, bool goalie) {
-  std::string cmd = "./hfo_policies/chaser " + std::to_string(port)
+  std::string cmd = "./bin/chaser " + std::to_string(port)
       + " " + team_name + " " + std::to_string(goalie);
   cmd += " > /dev/null";
   LOG(INFO) << "Starting chaser with command: " << cmd;

@@ -83,13 +83,12 @@ std::string GetArg(std::string input, int indx) {
 }
 
 // Busy sleep while suggesting that other threads run for a small amount of time
-void little_sleep(std::chrono::microseconds us)
-{
-    auto start = std::chrono::high_resolution_clock::now();
-    auto end = start + us;
-    do {
-        std::this_thread::yield();
-    } while (std::chrono::high_resolution_clock::now() < end);
+void little_sleep(std::chrono::microseconds us) {
+  auto start = std::chrono::high_resolution_clock::now();
+  auto end = start + us;
+  do {
+    std::this_thread::yield();
+  } while (std::chrono::high_resolution_clock::now() < end);
 }
 
 /**
@@ -140,7 +139,6 @@ std::tuple<double, int, status_t, double> PlayOneEpisode(HFOEnvironment& hfo,
             dqn::Transition(input_states, actor_output, reward, 0, next_state_sp):
             dqn::Transition(input_states, actor_output, reward, 0, boost::none);
         episode.push_back(transition);
-        // dqn.AddTransition(transition);
       }
     }
   }
@@ -220,17 +218,6 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
   LOG(INFO) << "Found Resumable(s): [" << resume_path << "] "
             << last_actor_snapshot << ", " << last_critic_snapshot
             << ", " << last_memory_snapshot;
-  // if (GetArg(FLAGS_critic_snapshot, tid).empty() &&
-  //     GetArg(FLAGS_critic_weights, tid).empty()) {
-  //   FLAGS_critic_snapshot = last_critic_snapshot;
-  // }
-  // if (GetArg(FLAGS_actor_snapshot, tid).empty() &&
-  //     GetArg(FLAGS_actor_weights, tid).empty()) {
-  //   FLAGS_actor_snapshot = last_actor_snapshot;
-  // }
-  // if (FLAGS_memory_snapshot.empty()) {
-  //   FLAGS_memory_snapshot = last_memory_snapshot;
-  // }
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
@@ -337,11 +324,17 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
 
   if (FLAGS_evaluate) {
     Evaluate(env, *dqn, tid);
+    delete dqn;
+    env.act(QUIT);
+    env.step();
     return;
   }
   if (FLAGS_benchmark) {
     PlayOneEpisode(env, *dqn, FLAGS_evaluate_with_epsilon, true, tid);
     dqn->Benchmark(1000);
+    delete dqn;
+    env.act(QUIT);
+    env.step();
     return;
   }
   if (FLAGS_learn_offline) {
@@ -349,6 +342,9 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
       dqn->Update();
     }
     dqn->Snapshot();
+    delete dqn;
+    env.act(QUIT);
+    env.step();
     return;
   }
   int last_eval_iter = dqn->max_iter();
@@ -381,6 +377,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port) {
   }
   dqn->Snapshot();
   delete dqn;
+  env.act(QUIT);
+  env.step();
 }
 
 void SystemExecute(std::string cmd) {
@@ -439,6 +437,6 @@ int main(int argc, char** argv) {
   for (int i = 0; i < threadNum; ++i) {
     player_threads[i].join();
   }
-  StopHFOServer();
+  // StopHFOServer();
   server_thread.join();
 };
