@@ -38,7 +38,7 @@ class HFOGameState {
   HFOGameState(int unum);
   ~HFOGameState();
   void update(hfo::HFOEnvironment& hfo);
-  float reward(float zeta);
+  float reward();
   float move_to_ball_reward();
   float kick_to_goal_reward();
   float EOT_reward();

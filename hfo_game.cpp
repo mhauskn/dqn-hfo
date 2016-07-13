@@ -173,10 +173,10 @@ void HFOGameState::update(HFOEnvironment& hfo) {
   steps++;
 }
 
-float HFOGameState::reward(float zeta) {
-  float moveToBallReward = zeta * move_to_ball_reward();
-  float kickToGoalReward = zeta * 3. * kick_to_goal_reward();
-  float passReward = zeta * 3. * pass_reward();
+float HFOGameState::reward() {
+  float moveToBallReward = move_to_ball_reward();
+  float kickToGoalReward = 3. * kick_to_goal_reward();
+  float passReward = 3. * pass_reward();
   float eotReward = EOT_reward();
   float reward = moveToBallReward + kickToGoalReward + eotReward;
   extrinsic_reward += eotReward;
@@ -228,8 +228,9 @@ float HFOGameState::EOT_reward() {
 }
 
 float HFOGameState::pass_reward() {
-  if (pass_active && player_on_ball.unum != old_player_on_ball.unum) {
+  if (pass_active && player_on_ball.unum > 0 && player_on_ball.unum != old_player_on_ball.unum) {
     pass_active = false;
+    LOG(INFO) << "Unum " << our_unum << " steps " << steps << " got pass reward!";
     return 1;
   }
   return 0;
