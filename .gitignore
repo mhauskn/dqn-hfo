@@ -27,15 +27,8 @@
 *.out
 *.app
 
-CMakeCache.txt
-CMakeFiles/
-Makefile
-cmake_install.cmake
-dqn
+bin/
 log/
-matplotlibrc
-scripts/HFO
+build/
+scripts/
 state/
-hfo_policies/dummy_goalie
-hfo_policies/dummy_teammate
-hfo_policies/chaser

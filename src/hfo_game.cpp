@@ -5,10 +5,9 @@
 #include <cmath>
 
 using namespace hfo;
-DEFINE_string(server_cmd, "./scripts/HFO --fullstate --frames-per-trial 500",
+DEFINE_string(server_cmd, "./bin/HFO --fullstate --frames-per-trial 500",
               "Command executed to start the HFO server.");
-DEFINE_string(config_dir, "/u/mhauskn/projects/HFO/bin/teams/base/config/formations-dt",
-              "Directory containing HFO config files.");
+DEFINE_string(config_dir, "bin/formations-dt", "Directory containing HFO config files.");
 DEFINE_bool(gui, false, "Open a GUI window.");
 DEFINE_bool(log_game, false, "Log the HFO game.");
 DEFINE_string(server_addr, "localhost", "Address of rcssserver.");

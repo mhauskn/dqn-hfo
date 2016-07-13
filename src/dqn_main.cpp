@@ -21,8 +21,6 @@ DEFINE_bool(learn_offline, false, "Just do updates on a fixed replaymemory.");
 // Load/Save Args
 DEFINE_string(save, "", "Prefix for saving snapshots");
 DEFINE_string(resume, "", "Prefix for resuming from. Default=save_path");
-DEFINE_string(actor_solver, "actor_solver.prototxt", "Actor solver (*.prototxt)");
-DEFINE_string(critic_solver, "critic_solver.prototxt", "Critic solver (*.prototxt)");
 DEFINE_string(actor_weights, "", "The actor pretrained weights load (*.caffemodel).");
 DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemodel).");
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
