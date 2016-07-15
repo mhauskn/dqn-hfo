@@ -110,7 +110,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
   int steps = 0;
   while (!task.episodeOver(tid)) {
     const std::vector<float>& current_state = env.getState();
-    CHECK_EQ(current_state.size(), dqn.state_size());
+    CHECK_LE(current_state.size(), dqn.state_size());
     dqn::StateDataSp current_state_sp
         = std::make_shared<dqn::StateData>(dqn.state_size());
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
@@ -132,9 +132,9 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     total_reward += reward;
     if (update) {
       const std::vector<float>& next_state = env.getState();
-      CHECK_EQ(next_state.size(), dqn.state_size());
+      CHECK_LE(next_state.size(), dqn.state_size());
       dqn::StateDataSp next_state_sp
-          = std::make_shared<dqn::StateData>(dqn.state_size());
+          = std::make_shared<dqn::StateData>(dqn.state_size(), 0);
       std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
       const auto transition = task.episodeOver(tid) ?
           dqn::Transition(input_states, actor_output, reward, 0, boost::none) :
@@ -213,7 +213,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port,
     caffe::Caffe::set_mode(caffe::Caffe::CPU);
   }
   // Look for a recent snapshot to resume
-  std::string resume_path = FLAGS_resume.empty() ? save_prefix : FLAGS_resume;
+  std::string resume_path = GetArg(FLAGS_resume, tid).empty() ?
+      save_prefix : GetArg(FLAGS_resume, tid);
   std::string last_actor_snapshot, last_critic_snapshot, last_memory_snapshot;
   dqn::FindLatestSnapshot(resume_path, last_actor_snapshot,
                           last_critic_snapshot, last_memory_snapshot);
@@ -223,10 +224,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port,
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
-  int num_players = FLAGS_offense_agents + FLAGS_offense_npcs
-      + FLAGS_offense_dummies + FLAGS_defense_agents + FLAGS_defense_npcs
-      + FLAGS_defense_dummies + FLAGS_defense_chasers;
-  int num_features = NumStateFeatures(num_players);
+  int num_features = NumStateFeatures(4); // Enough for up to 3 other agents
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
@@ -400,9 +398,10 @@ int main(int argc, char** argv) {
   srand(std::hash<std::string>()(save_path.native()));
   std::vector<Task*> tasks;
   int port = rand() % 40000 + 20000;
-  // std::unique_ptr<MoveToBall> mtb(new MoveToBall(port, FLAGS_offense_agents, FLAGS_defense_agents));
-  std::unique_ptr<Task> ktg(new KickToGoal(port, FLAGS_offense_agents, FLAGS_defense_agents));
-  tasks.emplace_back(ktg.get());
+  std::unique_ptr<Task> mtb(new MoveToBall(port, FLAGS_offense_agents, FLAGS_defense_agents));
+  tasks.emplace_back(mtb.get());
+  // std::unique_ptr<Task> ktg(new KickToGoal(port, FLAGS_offense_agents, FLAGS_defense_agents));
+  // tasks.emplace_back(ktg.get());
   std::vector<std::thread> player_threads;
   for (int i=0; i<FLAGS_offense_agents; ++i) {
     std::string save_prefix = save_path.native() + "_agent" + std::to_string(i);
