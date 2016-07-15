@@ -11,11 +11,17 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
-# 7-9-16 Train against a defense chaser
-JOB="Chaser_2v0"
+# 7-15-16 Sanity check the task system
+JOB="sanity"
 SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_chasers 1`
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE --offense_agents 1`
 monitor $JOB $SAVE $PID
+
+# 7-9-16 Train against a defense chaser
+# JOB="Chaser_2v0"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./dqn -save=$SAVE --offense_agents 2 --defense_chasers 1`
+# monitor $JOB $SAVE $PID
 
 # 7-9-16 Try pass reward
 # JOB="PassReward_2v0"
