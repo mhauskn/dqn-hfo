@@ -12,7 +12,12 @@ function monitor {
 }
 
 # 7-15-16 Sanity check the task system
-JOB="sanity"
+# JOB="sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE --offense_agents 1`
+# monitor $JOB $SAVE $PID
+
+JOB="KickToGoal_sanity"
 SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
 PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE --offense_agents 1`
 monitor $JOB $SAVE $PID

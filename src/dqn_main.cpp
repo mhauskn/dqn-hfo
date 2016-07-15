@@ -400,8 +400,9 @@ int main(int argc, char** argv) {
   srand(std::hash<std::string>()(save_path.native()));
   std::vector<Task*> tasks;
   int port = rand() % 40000 + 20000;
-  std::unique_ptr<MoveToBall> mtb(new MoveToBall(port, FLAGS_offense_agents, FLAGS_defense_agents));
-  tasks.emplace_back(mtb.get());
+  // std::unique_ptr<MoveToBall> mtb(new MoveToBall(port, FLAGS_offense_agents, FLAGS_defense_agents));
+  std::unique_ptr<Task> ktg(new KickToGoal(port, FLAGS_offense_agents, FLAGS_defense_agents));
+  tasks.emplace_back(ktg.get());
   std::vector<std::thread> player_threads;
   for (int i=0; i<FLAGS_offense_agents; ++i) {
     std::string save_prefix = save_path.native() + "_agent" + std::to_string(i);

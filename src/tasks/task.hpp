@@ -29,10 +29,6 @@ class Task {
                    int offense_on_ball=0, bool gui=false, bool log_game=false,
                    bool verbose=true);
 
-  // void connectAgentsToServer(int server_port, int offense_agents, int defense_agents,
-  //                            const std::vector<std::string>& offense_npc_commands,
-  //                            const std::vector<std::string>& defense_npc_commands);
-
  protected:
   std::string task_name_;
   std::vector<std::thread> threads_;
@@ -53,6 +49,17 @@ class MoveToBall : public Task {
  protected:
   std::vector<float> old_ball_prox_;
   std::vector<float> ball_prox_delta_;
+  std::vector<bool> first_step_;
+};
+
+class KickToGoal : public Task {
+ public:
+  KickToGoal(int server_port, int offense_agents, int defense_agents);
+  virtual float getReward(int tid) override;
+
+ protected:
+  std::vector<float> old_ball_dist_goal_;
+  std::vector<float> ball_dist_goal_delta_;
   std::vector<bool> first_step_;
 };
 

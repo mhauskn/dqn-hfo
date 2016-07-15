@@ -86,33 +86,6 @@ void Task::connectToServer(int tid) {
   }
 }
 
-// void Task::connectAgentsToServer(int server_port,
-//                                  int offense_agents,
-//                                  int defense_agents,
-//                                  const vector<string>& offense_npc_cmds,
-//                                  const vector<string>& defense_npc_cmds) {
-//   envs_.resize(offense_agents + defense_agents);
-//   for (int i=0; i<offense_agents; ++i) {
-//     envs_[i].connectToServer(LOW_LEVEL_FEATURE_SET, "bin/formations-dt", server_port);
-//     sleep(5);
-//   }
-//   for (string cmd : offense_npc_cmds) {
-//     LOG(INFO) << "Starting offense npc with command: " << cmd;
-//     threads_.emplace_back(std::thread(ExecuteCommand, cmd));
-//     sleep(5);
-//   }
-//   for (int i=0; i<defense_agents; ++i) {
-//     envs_[i].connectToServer(LOW_LEVEL_FEATURE_SET, "bin/formations-dt",
-//                              server_port, "localhost", "base_right", i==0);
-//     sleep(5);
-//   }
-//   for (string cmd : defense_npc_cmds) {
-//     LOG(INFO) << "Starting defense npc with command: " << cmd;
-//     threads_.emplace_back(std::thread(ExecuteCommand, cmd));
-//     sleep(5);
-//   }
-// }
-
 HFOEnvironment& Task::getEnv(int tid) {
   CHECK_GT(envs_.size(), tid);
   return envs_[tid];

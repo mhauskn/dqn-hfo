@@ -10,8 +10,6 @@ MoveToBall::MoveToBall(int server_port, int offense_agents, int defense_agents) 
     first_step_(offense_agents + defense_agents, true)
 {
   startServer(server_port, offense_agents, 0, defense_agents, 0);
-  // connectAgentsToServer(server_port, offense_agents, defense_agents,
-  //                       vector<string>(), vector<string>());
 }
 
 float MoveToBall::getReward(int tid) {
