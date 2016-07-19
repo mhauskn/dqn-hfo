@@ -5,6 +5,7 @@
 #include <HFO.hpp>
 #include <glog/logging.h>
 #include <gflags/gflags.h>
+#include <boost/thread/barrier.hpp>
 
 class Task {
  public:
@@ -15,19 +16,24 @@ class Task {
 
   // TODO: Do we want an act()?
   hfo::status_t step(int tid);
-  virtual float getReward(int tid) = 0;
-  hfo::HFOEnvironment& getEnv(int tid);
 
-  bool episodeOver(int tid) const;
+  // Calculates the reward an agent recieves
+  virtual float getReward(int tid) = 0;
+
+  // Returns true if the episode has ended
+  bool episodeOver() const { return episode_over_; }
+
+  hfo::HFOEnvironment& getEnv(int tid);
   hfo::status_t getStatus(int tid) const;
   std::string getName() const { return task_name_; }
+
+  hfo::status_t stepUntilEpisodeEnd(int tid);
 
  protected:
   void startServer(int port, int offense_agents, int offense_npcs,
                    int defense_agents, int defense_npcs, bool fullstate=true,
                    int frames_per_trial=500, float ball_x_min=0., float ball_x_max=0.2,
-                   int offense_on_ball=0, bool gui=false, bool log_game=false,
-                   bool verbose=true);
+                   int offense_on_ball=0);
 
  protected:
   std::string task_name_;
@@ -36,6 +42,8 @@ class Task {
   std::vector<hfo::status_t> status_;
   int offense_agents_, defense_agents_;
   int server_port_;
+  bool episode_over_;
+  boost::barrier barrier_;
 };
 
 /**
@@ -43,7 +51,8 @@ class Task {
  */
 class MoveToBall : public Task {
  public:
-  MoveToBall(int server_port, int offense_agents, int defense_agents);
+  MoveToBall(int server_port, int offense_agents, int defense_agents,
+             float ball_x_min=0.0, float ball_x_max=0.8);
   virtual float getReward(int tid) override;
 
  protected:
@@ -54,7 +63,8 @@ class MoveToBall : public Task {
 
 class KickToGoal : public Task {
  public:
-  KickToGoal(int server_port, int offense_agents, int defense_agents);
+  KickToGoal(int server_port, int offense_agents, int defense_agents,
+             float ball_x_min=0.4, float ball_x_max=0.8);
   virtual float getReward(int tid) override;
 
  protected:

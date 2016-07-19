@@ -3,6 +3,10 @@
 using namespace std;
 using namespace hfo;
 
+DEFINE_bool(gui, false, "Open a GUI window.");
+DEFINE_bool(log_game, false, "Log the HFO game.");
+DEFINE_bool(verbose, false, "Server prints verbose output.");
+
 void ExecuteCommand(string cmd) {
   CHECK_EQ(system(cmd.c_str()), 0) << "Failed to execute command: " << cmd;
 }
@@ -12,7 +16,9 @@ Task::Task(std::string task_name, int offense_agents, int defense_agents) :
     status_(offense_agents + defense_agents, IN_GAME),
     offense_agents_(offense_agents),
     defense_agents_(defense_agents),
-    server_port_(-1)
+    server_port_(-1),
+    episode_over_(false),
+    barrier_(offense_agents + defense_agents)
 {
   envs_.resize(offense_agents + defense_agents);
 }
@@ -30,19 +36,49 @@ Task::~Task() {
 status_t Task::step(int tid) {
   CHECK_GT(envs_.size(), tid);
   HFOEnvironment& env = envs_[tid];
-  status_t status = env.step();
+
+  status_t status;
+  if (episode_over_ && status_[tid] == IN_GAME) {
+    status = stepUntilEpisodeEnd(tid);
+  } else {
+    status = env.step();
+  }
+
   if (status == SERVER_DOWN) {
     LOG(FATAL) << "Server Down! Exiting.";
     exit(1);
   }
+
+  if (episode_over_ && status_[tid] != IN_GAME && status == IN_GAME) {
+    episode_over_ = false;
+  }
+
+  if (status != IN_GAME) {
+    episode_over_ = true;
+  }
+
   status_[tid] = status;
   return status;
 }
 
-bool Task::episodeOver(int tid) const {
-  CHECK_GT(status_.size(), tid);
-  return status_[tid] != IN_GAME;
+status_t Task::stepUntilEpisodeEnd(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+  while (status_[tid] == IN_GAME) {
+    env.act(NOOP);
+    status_[tid] = env.step();
+    if (status_[tid] == SERVER_DOWN) {
+      LOG(FATAL) << "Server Down! Exiting.";
+      exit(1);
+    }
+  }
+  return status_[tid];
 }
+
+// bool Task::episodeOver(int tid) const {
+//   CHECK_GT(status_.size(), tid);
+//   return status_[tid] != IN_GAME;
+// }
 
 status_t Task::getStatus(int tid) const {
   CHECK_GT(status_.size(), tid);
@@ -52,7 +88,7 @@ status_t Task::getStatus(int tid) const {
 void Task::startServer(int port, int offense_agents, int offense_npcs,
                        int defense_agents, int defense_npcs, bool fullstate,
                        int frames_per_trial, float ball_x_min, float ball_x_max,
-                       int offense_on_ball, bool gui, bool log_game, bool verbose) {
+                       int offense_on_ball) {
   server_port_ = port;
   std::string cmd = "./bin/HFO";
   cmd += " --port " + std::to_string(port)
@@ -65,9 +101,9 @@ void Task::startServer(int port, int offense_agents, int offense_npcs,
       + " --ball-x-max " + std::to_string(ball_x_max)
       + " --offense-on-ball " + std::to_string(offense_on_ball);
   if (fullstate) { cmd += " --fullstate"; }
-  if (!gui)      { cmd += " --headless"; }
-  if (!log_game) { cmd += " --no-logging"; }
-  if (verbose)   { cmd += " --verbose"; }
+  if (!FLAGS_gui)      { cmd += " --headless"; }
+  if (!FLAGS_log_game) { cmd += " --no-logging"; }
+  if (FLAGS_verbose)   { cmd += " --verbose"; }
   LOG(INFO) << "Starting server with command: " << cmd;
   threads_.emplace_back(std::thread(ExecuteCommand, cmd));
   sleep(5);

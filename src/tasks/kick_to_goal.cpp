@@ -4,14 +4,16 @@
 using namespace std;
 using namespace hfo;
 
-KickToGoal::KickToGoal(int server_port, int offense_agents, int defense_agents) :
+KickToGoal::KickToGoal(int server_port, int offense_agents, int defense_agents,
+                       float ball_x_min, float ball_x_max) :
     Task("kick_to_goal", offense_agents, defense_agents),
     old_ball_dist_goal_(offense_agents + defense_agents, 0.),
     ball_dist_goal_delta_(offense_agents + defense_agents, 0.),
     first_step_(offense_agents + defense_agents, true)
 {
+  int player_on_ball = 100; // Random offense agent will be given the ball
   startServer(server_port, offense_agents, 0, defense_agents, 0, true,
-              500, 0., 0.2, 1);
+              500, ball_x_min, ball_x_max, player_on_ball);
 }
 
 float KickToGoal::getReward(int tid) {
@@ -41,13 +43,13 @@ float KickToGoal::getReward(int tid) {
   }
   old_ball_dist_goal_[tid] = ball_dist_goal;
 
-  if (episodeOver(tid)) {
+  if (episodeOver()) {
     old_ball_dist_goal_[tid] = 0;
     ball_dist_goal_delta_[tid] = 0;
     first_step_[tid] = true;
   } else {
     first_step_[tid] = false;
   }
-
+  barrier_.wait();
   return ball_dist_goal_delta_[tid];
 }

@@ -3,13 +3,16 @@
 using namespace std;
 using namespace hfo;
 
-MoveToBall::MoveToBall(int server_port, int offense_agents, int defense_agents) :
+MoveToBall::MoveToBall(int server_port, int offense_agents, int defense_agents,
+                       float ball_x_min, float ball_x_max) :
     Task("move_to_ball", offense_agents, defense_agents),
     old_ball_prox_(offense_agents + defense_agents, 0.),
     ball_prox_delta_(offense_agents + defense_agents, 0.),
     first_step_(offense_agents + defense_agents, true)
 {
-  startServer(server_port, offense_agents, 0, defense_agents, 0);
+  int max_steps = 100;
+  startServer(server_port, offense_agents, 0, defense_agents, 0, true,
+              max_steps, ball_x_min, ball_x_max);
 }
 
 float MoveToBall::getReward(int tid) {
@@ -17,14 +20,21 @@ float MoveToBall::getReward(int tid) {
   HFOEnvironment& env = envs_[tid];
 
   const std::vector<float>& current_state = env.getState();
+  float kickable = current_state[12];
   float ball_proximity = current_state[53];
+
+  // Episode ends once an agent can kick the ball
+  if (kickable > 0 && !first_step_[tid]) {
+    episode_over_ = true;
+  }
 
   if (!first_step_[tid]) {
     ball_prox_delta_[tid] = ball_proximity - old_ball_prox_[tid];
   }
   old_ball_prox_[tid] = ball_proximity;
+  float reward = ball_prox_delta_[tid];
 
-  if (episodeOver(tid)) {
+  if (episodeOver()) {
     old_ball_prox_[tid] = 0;
     ball_prox_delta_[tid] = 0;
     first_step_[tid] = true;
@@ -32,5 +42,6 @@ float MoveToBall::getReward(int tid) {
     first_step_[tid] = false;
   }
 
-  return ball_prox_delta_[tid];
+  barrier_.wait();
+  return reward;
 }

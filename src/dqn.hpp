@@ -11,7 +11,12 @@
 #include <boost/functional/hash.hpp>
 #include <boost/optional.hpp>
 #include <mutex>
-#include "hfo_game.hpp"
+
+struct Action {
+  hfo::action_t action;
+  float arg1;
+  float arg2;
+};
 
 namespace dqn {
 

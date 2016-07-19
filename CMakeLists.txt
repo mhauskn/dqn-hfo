@@ -10,7 +10,7 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -march=native -Wno-deprecated-declarations")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/Modules")
 
-find_package(Boost 1.40 COMPONENTS filesystem system iostreams regex REQUIRED)
+find_package(Boost 1.40 COMPONENTS filesystem system iostreams regex thread REQUIRED)
 include_directories(${Boost_INCLUDE_DIRS})
 
 find_package(GFLAGS REQUIRED)

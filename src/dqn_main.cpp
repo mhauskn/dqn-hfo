@@ -3,7 +3,6 @@
 #include <glog/logging.h>
 #include <gflags/gflags.h>
 #include "dqn.hpp"
-#include "hfo_game.hpp"
 #include "tasks/task.hpp"
 #include <boost/filesystem.hpp>
 #include <thread>
@@ -63,6 +62,39 @@ DEFINE_int32(defense_chasers, 0, "Number of chasers playing defense");
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
 std::mutex MTX;
 
+Action GetRandomHFOAction(std::mt19937& random_engine) {
+  action_t action_indx = (action_t) std::uniform_int_distribution<int>
+      (DASH, KICK)(random_engine);
+  float arg1, arg2;
+  switch (action_indx) {
+    case DASH:
+      arg1 = std::uniform_real_distribution<float>(-100.0, 100.0)(random_engine);
+      arg2 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+      break;
+    case TURN:
+      arg1 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+      arg2 = 0;
+      break;
+    case TACKLE:
+      arg1 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+      arg2 = 0;
+      break;
+    case KICK:
+      arg1 = std::uniform_real_distribution<float>(0.0, 100.0)(random_engine);
+      arg2 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+      break;
+    default:
+      LOG(FATAL) << "Invalid Action Index: " << action_indx;
+      break;
+  }
+  Action act = {action_indx, arg1, arg2};
+  return act;
+}
+
+int NumStateFeatures(int num_players) {
+  return 50 + 8 * (num_players);
+}
+
 double CalculateEpsilon(const int iter) {
   if (iter < FLAGS_explore) {
     return 1.0 - (1.0 - FLAGS_epsilon) * (static_cast<double>(iter) / FLAGS_explore);
@@ -104,11 +136,12 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
   HFOEnvironment& env = task.getEnv(tid);
   env.act(NOOP);
   task.step(tid);
-  CHECK(!task.episodeOver(tid));
+  task.getReward(tid);
+  CHECK(!task.episodeOver());
   std::deque<dqn::StateDataSp> past_states;
   float total_reward = 0;
   int steps = 0;
-  while (!task.episodeOver(tid)) {
+  while (!task.episodeOver()) {
     const std::vector<float>& current_state = env.getState();
     CHECK_LE(current_state.size(), dqn.state_size());
     dqn::StateDataSp current_state_sp
@@ -124,19 +157,20 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
     VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
     Action action = dqn::GetAction(actor_output);
-    VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
-            << " Action: " << hfo::ActionToString(action.action);
     env.act(action.action, action.arg1, action.arg2);
     task.step(tid);
     float reward = task.getReward(tid);
     total_reward += reward;
+    VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
+            << " Action: " << hfo::ActionToString(action.action)
+            << " Reward: " << reward;
     if (update) {
       const std::vector<float>& next_state = env.getState();
       CHECK_LE(next_state.size(), dqn.state_size());
       dqn::StateDataSp next_state_sp
           = std::make_shared<dqn::StateData>(dqn.state_size(), 0);
       std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
-      const auto transition = task.episodeOver(tid) ?
+      const auto transition = task.episodeOver() ?
           dqn::Transition(input_states, actor_output, reward, 0, boost::none) :
           dqn::Transition(input_states, actor_output, reward, 0, next_state_sp);
       episode.push_back(transition);
@@ -149,6 +183,8 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn.AddTransitions(episode);
     if (FLAGS_share_replay_memory) { MTX.unlock(); }
   }
+  task.stepUntilEpisodeEnd(tid);
+  CHECK(task.episodeOver());
   return std::make_tuple(total_reward, steps, task.getStatus(tid));
 }
 
@@ -346,7 +382,9 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port,
     double epsilon = CalculateEpsilon(dqn->max_iter());
     auto result = PlayOneEpisode(*dqn, epsilon, true, tid, *tasks[0]);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
-              << " reward = " << std::get<0>(result);
+              << ", reward = " << std::get<0>(result)
+              << ", steps = " << std::get<1>(result)
+              << ", status = " << hfo::StatusToString(std::get<2>(result));
     int steps = std::get<1>(result);
     int n_updates = int(steps * FLAGS_update_ratio);
     if (FLAGS_share_replay_memory) { MTX.lock(); }
