@@ -5,7 +5,7 @@ using namespace hfo;
 
 MoveToBall::MoveToBall(int server_port, int offense_agents, int defense_agents,
                        float ball_x_min, float ball_x_max) :
-    Task("move_to_ball", offense_agents, defense_agents),
+    Task(taskName(), offense_agents, defense_agents),
     old_ball_prox_(offense_agents + defense_agents, 0.),
     ball_prox_delta_(offense_agents + defense_agents, 0.),
     first_step_(offense_agents + defense_agents, true)
@@ -13,6 +13,11 @@ MoveToBall::MoveToBall(int server_port, int offense_agents, int defense_agents,
   int max_steps = 100;
   startServer(server_port, offense_agents, 0, defense_agents, 0, true,
               max_steps, ball_x_min, ball_x_max);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
 }
 
 float MoveToBall::getReward(int tid) {

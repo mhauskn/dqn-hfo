@@ -14,12 +14,12 @@ function monitor {
 # 7-15-16 Sanity check the task system
 JOB="MoveToBall_sanity"
 SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE --offense_agents 1 -max_iter 300000`
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks move_to_ball`
 monitor $JOB $SAVE $PID
 
 # JOB="KickToGoal_sanity"
 # SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE --offense_agents 1 -max_iter 300000`
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks kick_to_goal`
 # monitor $JOB $SAVE $PID
 
 # 7-9-16 Train against a defense chaser

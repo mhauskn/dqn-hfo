@@ -4,6 +4,7 @@
 #include <gflags/gflags.h>
 #include "dqn.hpp"
 #include "tasks/task.hpp"
+#include "curriculum.hpp"
 #include <boost/filesystem.hpp>
 #include <thread>
 #include <mutex>
@@ -57,39 +58,11 @@ DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 DEFINE_int32(offense_dummies, 0, "Number of dummy npcs playing offense");
 DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
 DEFINE_int32(defense_chasers, 0, "Number of chasers playing defense");
+DEFINE_string(tasks, "", "Tasks to use.");
 
 // Global Variables Shared Between Threads
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
 std::mutex MTX;
-
-Action GetRandomHFOAction(std::mt19937& random_engine) {
-  action_t action_indx = (action_t) std::uniform_int_distribution<int>
-      (DASH, KICK)(random_engine);
-  float arg1, arg2;
-  switch (action_indx) {
-    case DASH:
-      arg1 = std::uniform_real_distribution<float>(-100.0, 100.0)(random_engine);
-      arg2 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      break;
-    case TURN:
-      arg1 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      arg2 = 0;
-      break;
-    case TACKLE:
-      arg1 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      arg2 = 0;
-      break;
-    case KICK:
-      arg1 = std::uniform_real_distribution<float>(0.0, 100.0)(random_engine);
-      arg2 = std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-      break;
-    default:
-      LOG(FATAL) << "Invalid Action Index: " << action_indx;
-      break;
-  }
-  Action act = {action_indx, arg1, arg2};
-  return act;
-}
 
 int NumStateFeatures(int num_players) {
   return 50 + 8 * (num_players);
@@ -240,9 +213,8 @@ double Evaluate(dqn::DQN& dqn, int tid, Task& task) {
   return avg_reward;
 }
 
-void KeepPlayingGames(int tid, std::string save_prefix, int port,
-                      std::vector<Task*> tasks) {
-  LOG(INFO) << "Thread " << tid << ", port=" << port << ", save_prefix=" << save_prefix;
+void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
+  LOG(INFO) << "Thread " << tid << ", save_prefix=" << save_prefix;
 
   if (FLAGS_gpu) {
     caffe::Caffe::set_mode(caffe::Caffe::GPU);
@@ -324,10 +296,6 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port,
     dqn->LoadReplayMemory(GetArg(FLAGS_memory_snapshot, tid));
   }
 
-  for (Task* task : tasks) {
-    task->connectToServer(tid);
-  }
-
   // Wait for all DQNs to connect and be ready
   DQNS[tid] = dqn.get();
   bool all_dqns_ready = false;
@@ -361,11 +329,11 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port,
   }
 
   if (FLAGS_evaluate) {
-    Evaluate(*dqn, tid, *tasks[0]);
+    Evaluate(*dqn, tid, tasks.getTask(tid));
     return;
   }
   if (FLAGS_benchmark) {
-    PlayOneEpisode(*dqn, FLAGS_evaluate_with_epsilon, true, tid, *tasks[0]);
+    PlayOneEpisode(*dqn, FLAGS_evaluate_with_epsilon, true, tid, tasks.getTask(tid));
     dqn->Benchmark(1000);
     return;
   }
@@ -380,11 +348,13 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port,
   double best_score = std::numeric_limits<double>::min();
   for (int episode = 0; dqn->max_iter() < FLAGS_max_iter; ++episode) {
     double epsilon = CalculateEpsilon(dqn->max_iter());
-    auto result = PlayOneEpisode(*dqn, epsilon, true, tid, *tasks[0]);
+    Task& task = tasks.getTask(tid);
+    auto result = PlayOneEpisode(*dqn, epsilon, true, tid, task);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
               << ", reward = " << std::get<0>(result)
               << ", steps = " << std::get<1>(result)
-              << ", status = " << hfo::StatusToString(std::get<2>(result));
+              << ", status = " << hfo::StatusToString(std::get<2>(result))
+              << ", task = " << task.getName();
     int steps = std::get<1>(result);
     int n_updates = int(steps * FLAGS_update_ratio);
     if (FLAGS_share_replay_memory) { MTX.lock(); }
@@ -393,7 +363,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, int port,
     }
     if (FLAGS_share_replay_memory) { MTX.unlock(); }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
-      double avg_score = Evaluate(*dqn, tid, *tasks[0]);
+      double avg_score = Evaluate(*dqn, tid, tasks.getTask(tid));
       if (avg_score > best_score) {
         LOG(INFO) << "[Agent " << tid << "] New High Score: " << avg_score
                   << ", actor_iter = " << dqn->actor_iter()
@@ -434,17 +404,23 @@ int main(int argc, char** argv) {
   for (int i=0; i<12; ++i) { // Make the global pointers all null
     DQNS[i] = NULL;
   }
-  srand(std::hash<std::string>()(save_path.native()));
-  std::vector<Task*> tasks;
-  int port = rand() % 40000 + 20000;
-  std::unique_ptr<Task> mtb(new MoveToBall(port, FLAGS_offense_agents, FLAGS_defense_agents));
-  tasks.emplace_back(mtb.get());
-  // std::unique_ptr<Task> ktg(new KickToGoal(port, FLAGS_offense_agents, FLAGS_defense_agents));
-  // tasks.emplace_back(ktg.get());
+  unsigned int seed = std::hash<std::string>()(save_path.native());
+  srand(seed);
+
+  // Build the curriculum of tasks
+  CHECK(!FLAGS_tasks.empty()) << "Specify one or more tasks to perform.";
+  RandomCurriculum tasks(FLAGS_offense_agents + FLAGS_defense_agents, seed);
+  for (int i=0; !GetArg(FLAGS_tasks, i).empty(); ++i) {
+    int port = rand() % 40000 + 20000;
+    std::string task = GetArg(FLAGS_tasks, i);
+    LOG(INFO) << "Adding Task " << task;
+    tasks.addTask(task, port, FLAGS_offense_agents, FLAGS_defense_agents);
+  }
+
   std::vector<std::thread> player_threads;
   for (int i=0; i<FLAGS_offense_agents; ++i) {
     std::string save_prefix = save_path.native() + "_agent" + std::to_string(i);
-    player_threads.emplace_back(KeepPlayingGames, i, save_prefix, port, tasks);
+    player_threads.emplace_back(KeepPlayingGames, i, save_prefix, std::ref(tasks));
     sleep(5);
   }
   for (std::thread& t : player_threads) {

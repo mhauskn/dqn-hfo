@@ -7,6 +7,8 @@ DEFINE_bool(gui, false, "Open a GUI window.");
 DEFINE_bool(log_game, false, "Log the HFO game.");
 DEFINE_bool(verbose, false, "Server prints verbose output.");
 
+bool FINISHED = false;
+
 void ExecuteCommand(string cmd) {
   CHECK_EQ(system(cmd.c_str()), 0) << "Failed to execute command: " << cmd;
 }
@@ -14,6 +16,9 @@ void ExecuteCommand(string cmd) {
 Task::Task(std::string task_name, int offense_agents, int defense_agents) :
     task_name_(task_name),
     status_(offense_agents + defense_agents, IN_GAME),
+    mutexs_(offense_agents + defense_agents),
+    cvs_(offense_agents + defense_agents),
+    need_to_step_(offense_agents + defense_agents, false),
     offense_agents_(offense_agents),
     defense_agents_(defense_agents),
     server_port_(-1),
@@ -24,9 +29,10 @@ Task::Task(std::string task_name, int offense_agents, int defense_agents) :
 }
 
 Task::~Task() {
-  for (HFOEnvironment& env : envs_) {
-    env.act(QUIT);
-    env.step();
+  FINISHED = true;
+  for (int i=0; i<envs_.size(); ++i) {
+    envs_[i].act(QUIT);
+    stepThread(i);
   }
   for (std::thread& t : threads_) {
     t.join();
@@ -35,30 +41,29 @@ Task::~Task() {
 
 status_t Task::step(int tid) {
   CHECK_GT(envs_.size(), tid);
-  HFOEnvironment& env = envs_[tid];
 
-  status_t status;
-  if (episode_over_ && status_[tid] == IN_GAME) {
-    status = stepUntilEpisodeEnd(tid);
+  status_t old_status = status_[tid];
+  if (episode_over_ && old_status == IN_GAME) {
+    stepUntilEpisodeEnd(tid);
   } else {
-    status = env.step();
+    stepThread(tid);
   }
+  status_t current_status = status_[tid];
 
-  if (status == SERVER_DOWN) {
+  if (current_status == SERVER_DOWN) {
     LOG(FATAL) << "Server Down! Exiting.";
     exit(1);
   }
 
-  if (episode_over_ && status_[tid] != IN_GAME && status == IN_GAME) {
+  if (episode_over_ && old_status != IN_GAME && current_status == IN_GAME) {
     episode_over_ = false;
   }
 
-  if (status != IN_GAME) {
+  if (current_status != IN_GAME) {
     episode_over_ = true;
   }
 
-  status_[tid] = status;
-  return status;
+  return current_status;
 }
 
 status_t Task::stepUntilEpisodeEnd(int tid) {
@@ -66,7 +71,7 @@ status_t Task::stepUntilEpisodeEnd(int tid) {
   HFOEnvironment& env = envs_[tid];
   while (status_[tid] == IN_GAME) {
     env.act(NOOP);
-    status_[tid] = env.step();
+    stepThread(tid);
     if (status_[tid] == SERVER_DOWN) {
       LOG(FATAL) << "Server Down! Exiting.";
       exit(1);
@@ -74,11 +79,6 @@ status_t Task::stepUntilEpisodeEnd(int tid) {
   }
   return status_[tid];
 }
-
-// bool Task::episodeOver(int tid) const {
-//   CHECK_GT(status_.size(), tid);
-//   return status_[tid] != IN_GAME;
-// }
 
 status_t Task::getStatus(int tid) const {
   CHECK_GT(status_.size(), tid);
@@ -109,16 +109,43 @@ void Task::startServer(int port, int offense_agents, int offense_npcs,
   sleep(5);
 }
 
+void Task::stepThread(int tid) {
+  mutexs_[tid].lock();
+  need_to_step_[tid] = true;
+  cvs_[tid].notify_one();
+  mutexs_[tid].unlock();
+  while (need_to_step_[tid]) {
+    std::this_thread::yield();
+  }
+}
+
+void EnvConnect(HFOEnvironment* env, int server_port, string team_name,
+                bool play_goalie, status_t* status_ptr,
+                mutex* mtx, condition_variable* cv, int* need_to_step) {
+  env->connectToServer(LOW_LEVEL_FEATURE_SET, "bin/formations-dt", server_port,
+                       "localhost", team_name, play_goalie);
+  while (!FINISHED) {
+    std::unique_lock<std::mutex> lck(*mtx);
+    while (!(*need_to_step)) {
+      cv->wait(lck);
+    }
+    *status_ptr = env->step();
+    *need_to_step = false;
+  }
+}
+
 void Task::connectToServer(int tid) {
   CHECK_GT(envs_.size(), tid);
   CHECK_GT(server_port_, 0);
   if (tid < offense_agents_) {
-    envs_[tid].connectToServer(LOW_LEVEL_FEATURE_SET, "bin/formations-dt",
-                               server_port_);
+    threads_.emplace_back(EnvConnect, &envs_[tid], server_port_, "base_left",
+                          false, &status_[tid],
+                          &mutexs_[tid], &cvs_[tid], &need_to_step_[tid]);
   } else {
-    envs_[tid].connectToServer(LOW_LEVEL_FEATURE_SET, "bin/formations-dt",
-                               server_port_, "localhost", "base_right",
-                               tid==offense_agents_);
+    bool play_goalie = tid == offense_agents_;
+    threads_.emplace_back(EnvConnect, &envs_[tid], server_port_, "base_right",
+                          play_goalie, &status_[tid],
+                          &mutexs_[tid], &cvs_[tid], &need_to_step_[tid]);
   }
 }
 

@@ -6,14 +6,20 @@ using namespace hfo;
 
 KickToGoal::KickToGoal(int server_port, int offense_agents, int defense_agents,
                        float ball_x_min, float ball_x_max) :
-    Task("kick_to_goal", offense_agents, defense_agents),
+    Task(taskName(), offense_agents, defense_agents),
     old_ball_dist_goal_(offense_agents + defense_agents, 0.),
     ball_dist_goal_delta_(offense_agents + defense_agents, 0.),
     first_step_(offense_agents + defense_agents, true)
 {
   int player_on_ball = 100; // Random offense agent will be given the ball
+  int max_steps = 60;
   startServer(server_port, offense_agents, 0, defense_agents, 0, true,
-              500, ball_x_min, ball_x_max, player_on_ball);
+              max_steps, ball_x_min, ball_x_max, player_on_ball);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
 }
 
 float KickToGoal::getReward(int tid) {
@@ -37,7 +43,6 @@ float KickToGoal::getReward(int tid) {
       - std::min(ball_ang_rad, goal_ang_rad);
   float ball_dist_goal = sqrt(ball_dist*ball_dist + goal_dist*goal_dist -
                               2.*ball_dist*goal_dist*cos(alpha));
-
   if (!first_step_[tid]) {
     ball_dist_goal_delta_[tid] = ball_dist_goal - old_ball_dist_goal_[tid];
   }
@@ -51,5 +56,5 @@ float KickToGoal::getReward(int tid) {
     first_step_[tid] = false;
   }
   barrier_.wait();
-  return ball_dist_goal_delta_[tid];
+  return -ball_dist_goal_delta_[tid];
 }
