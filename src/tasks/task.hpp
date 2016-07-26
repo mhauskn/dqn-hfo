@@ -74,6 +74,10 @@ class MoveToBall : public Task {
   std::vector<bool> first_step_;
 };
 
+/**
+ * KickToGoal task initializes the agent with the ball and rewards the
+ * agent for kicking the ball towards the goal.
+ */
 class KickToGoal : public Task {
  public:
   KickToGoal(int server_port, int offense_agents, int defense_agents,
@@ -86,6 +90,37 @@ class KickToGoal : public Task {
   std::vector<float> old_ball_dist_goal_;
   std::vector<float> ball_dist_goal_delta_;
   std::vector<bool> first_step_;
+};
+
+/**
+ * Soccer task initializes the agent away from the ball and only
+ * rewards the agent for scoring a goal.
+ */
+class Soccer : public Task {
+ public:
+  Soccer(int server_port, int offense_agents, int defense_agents);
+  virtual float getReward(int tid) override;
+  virtual float getMaxExpectedReward() { return 1; }
+  static std::string taskName() { return "soccer"; }
+};
+
+// class Pass : public Task {
+//  public:
+//   Passing(int server_port, int offense_agents, int defense_agents);
+//   virtual float getReward(int tid) override;
+//   virtual float getMaxExpectedReward() { return 1; }
+//   static std::string taskName() { return "pass"; }
+// };
+
+class Dribble : public Task {
+ public:
+  Dribble(int server_port, int offense_agents, int defense_agents);
+  virtual float getReward(int tid) override;
+  virtual float getMaxExpectedReward() { return 23; }
+  static std::string taskName() { return "dribble"; }
+
+ protected:
+  float episode_reward_;
 };
 
 #endif

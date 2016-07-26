@@ -48,6 +48,8 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
     task = new MoveToBall(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(KickToGoal::taskName()) == 0) {
     task = new KickToGoal(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(Dribble::taskName()) == 0) {
+    task = new Dribble(server_port, offense_agents, defense_agents);
   } else {
     LOG(FATAL) << "Task " << task_name << " is not a recognized task!";
   }

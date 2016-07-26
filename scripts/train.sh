@@ -11,11 +11,17 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
-# 7-15-16 Sanity check the task system
-JOB="MoveToBall_sanity"
+# 7-22-16 Sanity check dribble
+JOB="Dribble_sanity"
 SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks move_to_ball`
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks dribble`
 monitor $JOB $SAVE $PID
+
+# 7-15-16 Sanity check the task system
+# JOB="MoveToBall_sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks move_to_ball`
+# monitor $JOB $SAVE $PID
 
 # JOB="KickToGoal_sanity"
 # SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"

@@ -153,3 +153,49 @@ HFOEnvironment& Task::getEnv(int tid) {
   CHECK_GT(envs_.size(), tid);
   return envs_[tid];
 }
+
+
+Dribble::Dribble(int server_port, int offense_agents, int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents),
+    episode_reward_(0)
+{
+  int offense_on_ball = 1;
+  startServer(server_port, offense_agents, 0, defense_agents, 0, true,
+              500, 0, 0.2, offense_on_ball);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
+
+float Dribble::getReward(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+
+  const std::vector<float>& current_state = env.getState();
+  float self_vel_mag = current_state[4];
+  float ball_proximity = current_state[53];
+  float ball_vel_mag = current_state[55];
+
+  // LOG(INFO) << "self_vel " << self_vel_mag << " ball_prox " << ball_proximity
+  //           << " ball_vel " << ball_vel_mag;
+
+  float reward = 0;
+  if (ball_proximity >= .94 && ball_vel_mag >= -.8) {
+    reward += .1;
+  }
+  episode_reward_ += reward;
+  // Don't go out of bounds or lose control of the ball
+  if (status_[tid] == GOAL || status_[tid] == OUT_OF_BOUNDS ||
+      status_[tid] == CAPTURED_BY_DEFENSE) {
+    // Lose half of the total accrued reward for going out of bounds
+    reward -= 0.5 * episode_reward_;
+  }
+  if (episodeOver()) {
+    episode_reward_ = 0;
+  }
+
+  barrier_.wait();
+  return reward;
+}
