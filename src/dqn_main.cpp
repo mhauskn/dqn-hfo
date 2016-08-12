@@ -59,6 +59,7 @@ DEFINE_int32(offense_dummies, 0, "Number of dummy npcs playing offense");
 DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
 DEFINE_int32(defense_chasers, 0, "Number of chasers playing defense");
 DEFINE_string(tasks, "", "Tasks to use.");
+DEFINE_string(curriculum, "random", "Curriculum to use.");
 
 // Global Variables Shared Between Threads
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
@@ -109,11 +110,8 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
   HFOEnvironment& env = task.getEnv(tid);
   env.act(NOOP);
   task.step(tid);
-  task.getReward(tid);
   CHECK(!task.episodeOver());
   std::deque<dqn::StateDataSp> past_states;
-  float total_reward = 0;
-  int steps = 0;
   while (!task.episodeOver()) {
     const std::vector<float>& current_state = env.getState();
     CHECK_LE(current_state.size(), dqn.state_size());
@@ -131,9 +129,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
     Action action = dqn::GetAction(actor_output);
     env.act(action.action, action.arg1, action.arg2);
-    task.step(tid);
-    float reward = task.getReward(tid);
-    total_reward += reward;
+    float reward = task.step(tid).second;
     VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
             << " Action: " << hfo::ActionToString(action.action)
             << " Reward: " << reward;
@@ -148,7 +144,6 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
           dqn::Transition(input_states, actor_output, reward, 0, next_state_sp);
       episode.push_back(transition);
     }
-    steps++;
   }
   if (update) {
     if (FLAGS_share_replay_memory) { MTX.lock(); }
@@ -156,9 +151,10 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn.AddTransitions(episode);
     if (FLAGS_share_replay_memory) { MTX.unlock(); }
   }
-  task.stepUntilEpisodeEnd(tid);
   CHECK(task.episodeOver());
-  return std::make_tuple(total_reward, steps, task.getStatus(tid));
+  return std::make_tuple(task.getEpisodeReward(tid),
+                         task.getSteps(tid),
+                         task.getStatus(tid));
 }
 
 template <class T>
@@ -176,10 +172,10 @@ std::pair<double,double> get_avg_std(std::vector<T> data) {
   return std::make_pair(avg, std);
 }
 
-
 double Evaluate(dqn::DQN& dqn, int tid, Task& task) {
   LOG(INFO) << "[Agent" << tid << "] Evaluating for " << FLAGS_repeat_games
-            << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon;
+            << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon
+            << " task = " << task.getName();
   std::vector<double> scores;
   std::vector<int> steps;
   std::vector<int> successful_trial_steps;
@@ -209,8 +205,18 @@ double Evaluate(dqn::DQN& dqn, int tid, Task& task) {
             << ", steps_std = " << steps_dist.second
             << ", success_steps = " << succ_steps_dist.first
             << ", success_std = " << succ_steps_dist.second
-            << ", goal_perc = " << goal_percent;
+            << ", goal_perc = " << goal_percent
+            << ", task = " << task.getName()
+            << ", performance = " << (avg_reward / task.getMaxExpectedReward());
   return avg_reward;
+}
+
+double Evaluate(dqn::DQN& dqn, int tid, Curriculum& tasks) {
+  std::vector<double> task_perf;
+  for (Task* t : tasks.getTasks()) {
+    task_perf.push_back(Evaluate(dqn, tid, *t));
+  }
+  return get_avg_std(task_perf).first;
 }
 
 void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
@@ -329,7 +335,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   }
 
   if (FLAGS_evaluate) {
-    Evaluate(*dqn, tid, tasks.getTask(tid));
+    Evaluate(*dqn, tid, tasks);
     return;
   }
   if (FLAGS_benchmark) {
@@ -363,7 +369,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     }
     if (FLAGS_share_replay_memory) { MTX.unlock(); }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
-      double avg_score = Evaluate(*dqn, tid, tasks.getTask(tid));
+      double avg_score = Evaluate(*dqn, tid, tasks);
       if (avg_score > best_score) {
         LOG(INFO) << "[Agent " << tid << "] New High Score: " << avg_score
                   << ", actor_iter = " << dqn->actor_iter()
@@ -406,24 +412,23 @@ int main(int argc, char** argv) {
   }
   unsigned int seed = std::hash<std::string>()(save_path.native());
   srand(seed);
-
-  // Build the curriculum of tasks
+  Curriculum* tasks = Curriculum::getCurriculum(
+      FLAGS_curriculum, FLAGS_offense_agents + FLAGS_defense_agents, seed);
   CHECK(!FLAGS_tasks.empty()) << "Specify one or more tasks to perform.";
-  RandomCurriculum tasks(FLAGS_offense_agents + FLAGS_defense_agents, seed);
   for (int i=0; !GetArg(FLAGS_tasks, i).empty(); ++i) {
     int port = rand() % 40000 + 20000;
     std::string task = GetArg(FLAGS_tasks, i);
     LOG(INFO) << "Adding Task " << task;
-    tasks.addTask(task, port, FLAGS_offense_agents, FLAGS_defense_agents);
+    tasks->addTask(task, port, FLAGS_offense_agents, FLAGS_defense_agents);
   }
-
   std::vector<std::thread> player_threads;
   for (int i=0; i<FLAGS_offense_agents; ++i) {
     std::string save_prefix = save_path.native() + "_agent" + std::to_string(i);
-    player_threads.emplace_back(KeepPlayingGames, i, save_prefix, std::ref(tasks));
+    player_threads.emplace_back(KeepPlayingGames, i, save_prefix, std::ref(*tasks));
     sleep(5);
   }
   for (std::thread& t : player_threads) {
     t.join();
   }
+  delete tasks;
 };

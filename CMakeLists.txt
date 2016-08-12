@@ -52,6 +52,10 @@ add_executable(chaser ${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/chaser.cpp)
 set_target_properties(chaser PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 target_link_libraries(chaser ${HFO_LIBRARIES})
 
+add_executable(passer ${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/passer.cpp)
+set_target_properties(passer PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+target_link_libraries(passer ${HFO_LIBRARIES})
+
 add_custom_command(TARGET dqn POST_BUILD
   COMMAND ln -sf ${HFO_ROOT_DIR}/bin/HFO ${CMAKE_CURRENT_SOURCE_DIR}/bin/)
 

@@ -3,11 +3,15 @@
 
 #include "tasks/task.hpp"
 #include <mutex>
+#include <deque>
 
 class Curriculum {
  public:
   Curriculum(int num_agents);
   ~Curriculum();
+
+  // Returns a curriculum by name
+  static Curriculum* getCurriculum(std::string name, int num_agents, unsigned seed);
 
   // Adds a task by pointer
   void addTask(Task* task);
@@ -24,16 +28,19 @@ class Curriculum {
   // Returns a task by name
   Task& getTask(std::string task_name);
 
-  inline std::vector<Task*>& getTasks() { return tasks_; }
+  inline std::vector<Task*>& getTasks() { return all_tasks_; }
 
  protected:
   virtual void queueTasks() = 0;
 
-  std::vector<Task*> tasks_;
-  std::vector<Task*> current_;
+  std::vector<Task*> all_tasks_;
+  std::vector<Task*> current_tasks_;
   std::mutex mutex_;
 };
 
+/**
+ * RandomCurriculum selects a random task at each step to perform.
+ */
 class RandomCurriculum : public Curriculum {
  public:
   RandomCurriculum(int num_agents, unsigned seed);
@@ -42,6 +49,21 @@ class RandomCurriculum : public Curriculum {
   virtual void queueTasks();
 
   std::mt19937 random_engine_;
+};
+
+/**
+ * SequentialCurriculum performs one task until mastery before
+ * switching to the next.
+ */
+class SequentialCurriculum : public Curriculum {
+ public:
+  SequentialCurriculum(int num_agents);
+
+ protected:
+  virtual void queueTasks();
+  int curr_task_indx_;
+  std::deque<float> task_perf_queue_; // Used to average performance of task
+  const static int kMaxQueueSize = 100; // Size of task_perf_queue
 };
 
 #endif

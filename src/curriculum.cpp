@@ -3,19 +3,29 @@
 using namespace std;
 using namespace hfo;
 
+Curriculum* Curriculum::getCurriculum(std::string name, int num_agents, unsigned seed) {
+  if (name.compare("random") == 0) {
+    return new RandomCurriculum(num_agents, seed);
+  } else if (name.compare("sequential") == 0) {
+    return new SequentialCurriculum(num_agents);
+  } else {
+    LOG(FATAL) << "Unrecognized Curriculum Requested: " << name;
+  }
+}
+
 Curriculum::Curriculum(int num_agents) :
-    current_(num_agents, NULL)
+    current_tasks_(num_agents, NULL)
 {
 }
 
 Curriculum::~Curriculum() {
-  for (Task* t : tasks_) {
+  for (Task* t : all_tasks_) {
     delete t;
   }
 }
 
 Task& Curriculum::getTask(std::string task_name) {
-  for (Task* t : tasks_) {
+  for (Task* t : all_tasks_) {
     if (t->getName().compare(task_name) == 0) {
       return *t;
     }
@@ -24,21 +34,21 @@ Task& Curriculum::getTask(std::string task_name) {
 }
 
 Task& Curriculum::getTask(int tid) {
-  CHECK_GT(current_.size(), tid);
+  CHECK_GT(current_tasks_.size(), tid);
   mutex_.lock();
-  if (std::all_of(current_.cbegin(), current_.cend(),
+  if (std::all_of(current_tasks_.cbegin(), current_tasks_.cend(),
                   [](Task* t){ return t == NULL; })) {
     queueTasks();
   }
-  Task* task_ptr = current_[tid];
+  Task* task_ptr = current_tasks_[tid];
   CHECK_NOTNULL(task_ptr);
-  current_[tid] = NULL;
+  current_tasks_[tid] = NULL;
   mutex_.unlock();
   return *task_ptr;
 }
 
 void Curriculum::addTask(Task* task) {
-  tasks_.push_back(task);
+  all_tasks_.push_back(task);
 }
 
 Task& Curriculum::addTask(std::string task_name, int server_port,
@@ -48,20 +58,24 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
     task = new MoveToBall(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(KickToGoal::taskName()) == 0) {
     task = new KickToGoal(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(Soccer::taskName()) == 0) {
+    task = new Soccer(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Dribble::taskName()) == 0) {
     task = new Dribble(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(Pass::taskName()) == 0) {
+    task = new Pass(server_port, offense_agents, defense_agents);
   } else {
     LOG(FATAL) << "Task " << task_name << " is not a recognized task!";
   }
-  tasks_.push_back(task);
+  all_tasks_.push_back(task);
   return *task;
 }
 
 void Curriculum::removeTask(std::string task_name) {
-  for (vector<Task*>::iterator it = tasks_.begin() ; it != tasks_.end(); ++it) {
+  for (vector<Task*>::iterator it = all_tasks_.begin() ; it != all_tasks_.end(); ++it) {
     if ((*it)->getName().compare(task_name) == 0) {
       delete *it;
-      tasks_.erase(it);
+      all_tasks_.erase(it);
       return;
     }
   }
@@ -75,8 +89,45 @@ RandomCurriculum::RandomCurriculum(int num_agents, unsigned seed) :
 }
 
 void RandomCurriculum::queueTasks() {
-  int indx = std::uniform_int_distribution<int>(0, tasks_.size()-1)(random_engine_);
-  for (int i=0; i<current_.size(); ++i) {
-    current_[i] = tasks_[indx];
+  int indx = std::uniform_int_distribution<int>(0, all_tasks_.size()-1)(random_engine_);
+  for (int i=0; i<current_tasks_.size(); ++i) {
+    current_tasks_[i] = all_tasks_[indx];
+  }
+}
+
+SequentialCurriculum::SequentialCurriculum(int num_agents) :
+    Curriculum(num_agents),
+    curr_task_indx_(0)
+{
+}
+
+void SequentialCurriculum::queueTasks() {
+  Task* curr_task = all_tasks_[curr_task_indx_];
+  float ep_rewards = 0;
+  for (int i=0; i<curr_task->getNumAgents(); ++i) {
+    ep_rewards += curr_task->getLastEpisodeReward(i);
+  }
+
+  float performance = ep_rewards /
+      (curr_task->getNumAgents() * curr_task->getMaxExpectedReward());
+  task_perf_queue_.push_back(performance);
+  while (task_perf_queue_.size() > kMaxQueueSize) {
+    task_perf_queue_.pop_front();
+  }
+
+  float avg_perf = 0;
+  for (int i=0; i<task_perf_queue_.size(); ++i) {
+    avg_perf += task_perf_queue_[i];
+  }
+  avg_perf /= float(kMaxQueueSize);
+
+  if (avg_perf >= 0.9) {
+    curr_task_indx_ = min(int(all_tasks_.size() - 1), curr_task_indx_ + 1);
+    task_perf_queue_.clear();
+    LOG(INFO) << "SequentialCurriculum: Graduated from task " << curr_task->getName()
+              << " with avg_performance " << avg_perf;
+  }
+  for (int i=0; i<current_tasks_.size(); ++i) {
+    current_tasks_[i] = all_tasks_[curr_task_indx_];
   }
 }

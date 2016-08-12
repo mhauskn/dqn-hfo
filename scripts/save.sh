@@ -50,7 +50,7 @@ grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*avg_rew
 grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*avg_steps = (\S+),.*steps_std = (\S+),.*' '\[Agent1\].*actor_iter = (\d+),.*avg_steps = (\S+),.*steps_std = (\S+),.*' --xlabel 'Iteration' --ylabel 'Average Steps' --title "$PREFIX Evaluation" -g -T $MARKERS $LEGEND -c Accent -f .5 -o $SAVE"_eval_steps.png" &
 
 # Plot Evaluation Goal Percentage
-grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*goal_perc = (\S+).*' '\[Agent1\].*actor_iter = (\d+),.*goal_perc = (\S+).*' --xlabel 'Iteration' --ylabel 'Goal Percentage' --title "$PREFIX Evaluation" -g -T $MARKERS $LEGEND -c Set3 -f .5 -o $SAVE"_eval_goal_perc.png" &
+grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*goal_perc = (\S+),.*' '\[Agent1\].*actor_iter = (\d+),.*goal_perc = (\S+),.*' --xlabel 'Iteration' --ylabel 'Goal Percentage' --title "$PREFIX Evaluation" -g -T $MARKERS $LEGEND -c Set3 -f .5 -o $SAVE"_eval_goal_perc.png" &
 
 # Plot Critic Loss
 grep "Critic Iteration" $LOGS | lmj-plot -m '\[Agent0\] Critic Iteration (\d+), loss = (\S+)' '\[Agent1\] Critic Iteration (\d+), loss = (\S+)' --num-x-ticks 8 --xlabel 'Iteration' --ylabel 'Critic Average Loss' --title $PREFIX -g -T --log y $MARKERS $LEGEND -c Pastel1 -o $SAVE"_loss.png" &
@@ -58,5 +58,10 @@ grep "Critic Iteration" $LOGS | lmj-plot -m '\[Agent0\] Critic Iteration (\d+), 
 # Plot avg q_value
 grep "Actor Iteration" $LOGS | lmj-plot -m '\[Agent0\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' '\[Agent1\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' --num-x-ticks 8 --xlabel 'Iteration' --ylabel 'Actor Average Q-Value' --title $PREFIX -g -T --log y $MARKERS $LEGEND -c Pastel2 -o $SAVE"_avgq.png" &
 
-# Plot Zeta
-# grep "Zeta" $LOGS | lmj-plot -m 'Zeta = (\S+)' --num-x-ticks 8 --xlabel 'Episode' --ylabel 'Zeta' --title $PREFIX -g -T $MARKERS $LEGEND -c Pastel1 -o $SAVE"_zeta.png" &
+tasks="move_to_ball dribble kick_to_goal soccer pass"
+for task in $tasks;
+do
+    if grep -q "Episode [0-9]*,.*task = $task" $LOGS; then
+        grep "Episode [0-9]*,.*task = $task" $LOGS | lmj-plot -m '\[Agent0\] Episode (\d+), reward = (\S+),.*' '\[Agent1\] Episode (\d+), reward = (\S+),.*' --xlabel Episode --ylabel Reward --title "$PREFIX $task reward" -g -T $MARKERS $LEGEND -c Dark2 -o $SAVE"_"$task"_reward.png" &
+    fi
+done
