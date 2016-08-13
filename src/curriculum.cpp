@@ -3,6 +3,8 @@
 using namespace std;
 using namespace hfo;
 
+DEFINE_double(performance_threshold, .8, "Threshold for Sequential Curriculum");
+
 Curriculum* Curriculum::getCurriculum(std::string name, int num_agents, unsigned seed) {
   if (name.compare("random") == 0) {
     return new RandomCurriculum(num_agents, seed);
@@ -121,7 +123,7 @@ void SequentialCurriculum::queueTasks() {
   }
   avg_perf /= float(kMaxQueueSize);
 
-  if (avg_perf >= 0.9) {
+  if (avg_perf >= FLAGS_performance_threshold) {
     curr_task_indx_ = min(int(all_tasks_.size() - 1), curr_task_indx_ + 1);
     task_perf_queue_.clear();
     LOG(INFO) << "SequentialCurriculum: Graduated from task " << curr_task->getName()
