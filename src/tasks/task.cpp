@@ -306,33 +306,11 @@ float Pass::getReward(int tid) {
     VLOG(1) << "Pass Active. Kicker " << pob.unum;
   }
 
-  // If we kicked the ball, don't move
-  // if (pass_active_[tid] && kicker_[tid].unum == env.getUnum()) {
-  //   reward -= self_vel_mag;
-  //   VLOG(1) << "reward -= self_vel_mag; " << self_vel_mag;
-  // }
-
-  // if (pass_active_[tid] && pob.unum != kicker_[tid].unum) {
-    // if (kicker_[tid].unum == env.getUnum()) {
-      // If we passed, points are given for minimizing ball_dist_teammate
-      // reward -= ball_dist_teammate_delta;
-      // VLOG(1) << "reward -= ball_dist_teammate_delta " << ball_dist_teammate_delta;
-      // We must also not run towards the teammate
-      // reward += min(0.f, teammate_prox_delta_);
-      // VLOG(1) << "reward += min(0.f, teammate_prox_delta_)" << min(0.f, teammate_prox_delta_);
-    // }
-  // }
-
   // Rewarded for going to ball when pass is inactive and we are closer
   if (ball_dist < ball_dist_teammate && !pass_active_[tid]) {
     reward += ball_prox_delta_;
     VLOG(1) << "reward += ball_prox_delta_ " << ball_prox_delta_;
   }
-
-  // if (teammate_dist <= 0.3) { // Rewarded for making space
-  //   reward += teammate_prox_delta_;
-  //   VLOG(1) << "reward += teammate_prox_delta_ " << teammate_prox_delta_;
-  // }
 
   old_ball_prox_[tid] = ball_proximity;
   old_teammate_prox_[tid] = teammate_proximity;

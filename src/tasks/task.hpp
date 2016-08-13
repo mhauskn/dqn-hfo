@@ -128,7 +128,7 @@ class Dribble : public Task {
 class Pass : public Task {
  public:
   Pass(int server_port, int offense_agents, int defense_agents);
-  virtual float getMaxExpectedReward() { return 1; }
+  virtual float getMaxExpectedReward() { return 27; }
   static std::string taskName() { return "pass"; }
 
  protected:
