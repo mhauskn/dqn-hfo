@@ -236,7 +236,6 @@ Pass::Pass(int server_port, int offense_agents, int defense_agents) :
     Task(taskName(), offense_agents, defense_agents),
     pass_active_(offense_agents + defense_agents, false),
     kicker_(offense_agents + defense_agents),
-    pass_timer_(offense_agents + defense_agents, 0),
     old_ball_prox_(offense_agents + defense_agents, 0.),
     old_teammate_prox_(offense_agents + defense_agents, 0.),
     old_ball_dist_teammate_(offense_agents + defense_agents, 0.),
@@ -271,8 +270,9 @@ float Pass::getReward(int tid) {
   float ball_vel_mag = current_state[55];
   float teammate_proximity = current_state[60];
   float teammate_dist = 1. - (teammate_proximity+1.)/2.;
-  float ball_dist_teammate = getDist(ball_dist, current_state[51], current_state[52],
-                                     teammate_dist, current_state[58], current_state[59]);
+  float ball_dist_teammate = getDist(
+      ball_dist, current_state[51], current_state[52],
+      teammate_dist, current_state[58], current_state[59]);
   float ball_dist_teammate_delta = ball_dist_teammate - old_ball_dist_teammate_[tid];
   float ball_prox_delta_ = ball_proximity - old_ball_prox_[tid];
   float teammate_prox_delta_ = teammate_proximity - old_teammate_prox_[tid];
@@ -285,12 +285,10 @@ float Pass::getReward(int tid) {
       reward += 1.;
       VLOG(1) << "Pass Inactive: Ball Caught! Reward 1";
       pass_active_[tid] = false;
-      pass_timer_[tid] = 0;
     } else if (ball_vel_mag <= -.8) {
       reward -= 1.;
       VLOG(1) << "Pass Inactive: Ball too slow. Reward -1";
       pass_active_[tid] = false;
-      pass_timer_[tid] = 0;
     }
   }
 
@@ -302,7 +300,6 @@ float Pass::getReward(int tid) {
     }
     pass_active_[tid] = true;
     kicker_[tid] = pob;
-    pass_timer_[tid] = 0;
     VLOG(1) << "Pass Active. Kicker " << pob.unum;
   }
 
@@ -315,8 +312,8 @@ float Pass::getReward(int tid) {
   old_ball_prox_[tid] = ball_proximity;
   old_teammate_prox_[tid] = teammate_proximity;
   old_ball_dist_teammate_[tid] = ball_dist_teammate;
-  pass_timer_[tid] += 1;
   status_t s = status_[tid];
+
   // Lose half of the accrued reward for ball out of bounds
   if (s == GOAL || s == OUT_OF_BOUNDS || s == CAPTURED_BY_DEFENSE) {
     reward -= std::max(0., 0.5 * episode_reward_[tid]);
@@ -324,7 +321,6 @@ float Pass::getReward(int tid) {
   }
   if (episodeOver()) {
     pass_active_[tid] = false;
-    pass_timer_[tid] = 0;
     old_ball_dist_teammate_[tid] = 0;
     old_ball_prox_[tid] = 0;
     old_teammate_prox_[tid] = 0;

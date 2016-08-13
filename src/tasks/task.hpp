@@ -136,7 +136,6 @@ class Pass : public Task {
 
   std::vector<bool> pass_active_;
   std::vector<hfo::Player> kicker_;
-  std::vector<int> pass_timer_;
   std::vector<float> old_ball_prox_;
   std::vector<float> old_teammate_prox_;
   std::vector<float> old_ball_dist_teammate_;
