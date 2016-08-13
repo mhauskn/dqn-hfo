@@ -242,9 +242,9 @@ Pass::Pass(int server_port, int offense_agents, int defense_agents) :
     first_step_(offense_agents + defense_agents, true),
     got_kickable_reward_(offense_agents + defense_agents, false)
 {
-  CHECK_EQ(offense_agents, 1);
+  CHECK_LE(offense_agents, 2);
   int offense_on_ball = 100; // Randomize who gets the ball
-  startServer(server_port, offense_agents + 1, 0, defense_agents, 0, true,
+  startServer(server_port, 2, 0, defense_agents, 0, true,
               500, 0.5, 0.5, offense_on_ball);
   // Connect the agents to the server
   for (int i=0; i<envs_.size(); ++i) {
@@ -252,9 +252,11 @@ Pass::Pass(int server_port, int offense_agents, int defense_agents) :
     sleep(5);
   }
   // Start a passing teammate
-  string cmd = "./bin/passer " + std::to_string(server_port) + " base_left false &";
-  ExecuteCommand(cmd);
-  threads_.emplace_back(ExecuteCommand, cmd);
+  if (offense_agents == 1) {
+    string cmd = "./bin/passer " + std::to_string(server_port) + " base_left false &";
+    ExecuteCommand(cmd);
+    threads_.emplace_back(ExecuteCommand, cmd);
+  }
 }
 
 float Pass::getReward(int tid) {

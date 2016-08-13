@@ -11,11 +11,17 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
-# 8-12-16
-JOB="SequentialCurriculum"
+# 8-13-16
+JOB="MultiagentPass"
 SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks move_to_ball,dribble,kick_to_goal,soccer -curriculum sequential`
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 2 -tasks pass`
 monitor $JOB $SAVE $PID
+
+# 8-12-16
+# JOB="SequentialCurriculum"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks move_to_ball,dribble,kick_to_goal,soccer -curriculum sequential`
+# monitor $JOB $SAVE $PID
 
 # 8-1-16 Try multiple tasks
 # JOB="SingleAgentCurriculum"
