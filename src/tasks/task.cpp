@@ -335,7 +335,6 @@ float Pass::getReward(int tid) {
 Cross::Cross(int server_port, int offense_agents, int defense_agents,
              float ball_x_min, float ball_x_max) :
     Task(taskName(), offense_agents, defense_agents),
-    first_step_(offense_agents + defense_agents, true),
     initial_pob_(offense_agents + defense_agents)
  {
   CHECK_EQ(offense_agents, 2);

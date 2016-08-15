@@ -150,7 +150,6 @@ class Cross : public Task {
  protected:
   virtual float getReward(int tid) override;
 
-  std::vector<bool> first_step_;
   std::vector<hfo::Player> initial_pob_;
 };
 
