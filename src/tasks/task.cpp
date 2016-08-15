@@ -240,7 +240,6 @@ Pass::Pass(int server_port, int offense_agents, int defense_agents) :
     old_ball_prox_(offense_agents + defense_agents, 0.),
     old_teammate_prox_(offense_agents + defense_agents, 0.),
     old_ball_dist_teammate_(offense_agents + defense_agents, 0.),
-    first_step_(offense_agents + defense_agents, true),
     got_kickable_reward_(offense_agents + defense_agents, false)
 {
   CHECK_LE(offense_agents, 2);
@@ -329,6 +328,49 @@ float Pass::getReward(int tid) {
     old_teammate_prox_[tid] = 0;
     got_kickable_reward_[tid] = false;
   }
+  barrier_.wait();
+  return reward;
+}
+
+Cross::Cross(int server_port, int offense_agents, int defense_agents,
+             float ball_x_min, float ball_x_max) :
+    Task(taskName(), offense_agents, defense_agents),
+    first_step_(offense_agents + defense_agents, true),
+    initial_pob_(offense_agents + defense_agents)
+ {
+  CHECK_EQ(offense_agents, 2);
+  int offense_on_ball = 100; // Randomize who gets the ball
+  int defense_npcs = 1;
+  startServer(server_port, 2, 0, defense_agents, defense_npcs, true,
+              500, ball_x_min, ball_x_max, offense_on_ball);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
+
+float Cross::getReward(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+
+  if (initial_pob_[tid].side != LEFT || initial_pob_[tid].unum <= 0) {
+    initial_pob_[tid] = env.playerOnBall();
+    VLOG(1) << "Initial POB: " << initial_pob_[tid].unum << " side " << initial_pob_[tid].side;
+  }
+
+  float reward = 0;
+
+  // Both players get a reward when the player who didn't start with the ball scores
+  if (status_[tid] == GOAL && (env.playerOnBall().unum != initial_pob_[tid].unum)) {
+    reward += 1;
+  }
+
+  if (episodeOver()) {
+    initial_pob_[tid].unum = 0;
+    initial_pob_[tid].side = NEUTRAL;
+  }
+
   barrier_.wait();
   return reward;
 }

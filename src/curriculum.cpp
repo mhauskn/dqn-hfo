@@ -66,6 +66,8 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
     task = new Dribble(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Pass::taskName()) == 0) {
     task = new Pass(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(Cross::taskName()) == 0) {
+    task = new Cross(server_port, offense_agents, defense_agents);
   } else {
     LOG(FATAL) << "Task " << task_name << " is not a recognized task!";
   }

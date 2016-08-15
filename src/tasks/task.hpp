@@ -137,9 +137,21 @@ class Pass : public Task {
   std::vector<float> old_ball_prox_;
   std::vector<float> old_teammate_prox_;
   std::vector<float> old_ball_dist_teammate_;
-  std::vector<bool> first_step_;
   std::vector<bool> got_kickable_reward_;
 };
 
+class Cross : public Task {
+ public:
+  Cross(int server_port, int offense_agents, int defense_agents,
+        float ball_x_min=0.7, float ball_x_max=0.7);
+  virtual float getMaxExpectedReward() { return 1; }
+  static std::string taskName() { return "cross"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+
+  std::vector<bool> first_step_;
+  std::vector<hfo::Player> initial_pob_;
+};
 
 #endif
