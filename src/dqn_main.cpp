@@ -112,6 +112,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
   task.step(tid);
   CHECK(!task.episodeOver());
   std::deque<dqn::StateDataSp> past_states;
+  int steps = 0;
   while (!task.episodeOver()) {
     const std::vector<float>& current_state = env.getState();
     CHECK_LE(current_state.size(), dqn.state_size());
@@ -130,6 +131,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     Action action = dqn::GetAction(actor_output);
     env.act(action.action, action.arg1, action.arg2);
     float reward = task.step(tid).second;
+    steps++;
     VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
             << " Action: " << hfo::ActionToString(action.action)
             << " Reward: " << reward;
@@ -153,7 +155,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
   }
   CHECK(task.episodeOver());
   return std::make_tuple(task.getEpisodeReward(tid),
-                         task.getSteps(tid),
+                         steps,
                          task.getStatus(tid));
 }
 

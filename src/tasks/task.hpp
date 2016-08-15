@@ -26,7 +26,6 @@ class Task {
   std::string getName() const { return task_name_; }
   float getEpisodeReward(int tid) const { return episode_reward_[tid]; }
   float getLastEpisodeReward(int tid) const { return last_episode_reward_[tid]; }
-  int getSteps(int tid) const { return steps_[tid]; }
   int getNumAgents() const { return envs_.size(); }
 
  protected:
@@ -49,7 +48,6 @@ class Task {
   std::vector<int> need_to_step_;
   std::vector<float> episode_reward_;
   std::vector<float> last_episode_reward_;
-  std::vector<int> steps_;
   int offense_agents_, defense_agents_;
   int server_port_;
   bool episode_over_;
@@ -115,7 +113,7 @@ class Soccer : public Task {
 class Dribble : public Task {
  public:
   Dribble(int server_port, int offense_agents, int defense_agents);
-  virtual float getMaxExpectedReward() { return 26; }
+  virtual float getMaxExpectedReward() { return 20; }
   static std::string taskName() { return "dribble"; }
 
  protected:

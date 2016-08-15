@@ -37,7 +37,6 @@ Task::Task(std::string task_name, int offense_agents, int defense_agents) :
     need_to_step_(offense_agents + defense_agents, false),
     episode_reward_(offense_agents + defense_agents, 0),
     last_episode_reward_(offense_agents + defense_agents, 0),
-    steps_(offense_agents + defense_agents, 0),
     offense_agents_(offense_agents),
     defense_agents_(defense_agents),
     server_port_(-1),
@@ -69,19 +68,21 @@ pair<status_t, float> Task::step(int tid) {
     stepThread(tid);
   }
   status_t current_status = status_[tid];
-  steps_[tid] += 1;
   if (current_status == SERVER_DOWN) {
     LOG(FATAL) << "Server Down! Exiting.";
     exit(1);
   }
   if (episode_over_ && old_status != IN_GAME && current_status == IN_GAME) {
     episode_over_ = false;
-    episode_reward_[tid] = 0;
-    steps_[tid] = 0;
+    for (int i=0; i<envs_.size(); ++i) {
+      episode_reward_[i] = 0;
+    }
   }
   if (current_status != IN_GAME) {
     episode_over_ = true;
-    last_episode_reward_[tid] = episode_reward_[tid];
+    for (int i=0; i<envs_.size(); ++i) {
+      last_episode_reward_[i] = episode_reward_[i];
+    }
   }
   return make_pair(current_status, reward);
 }
@@ -288,8 +289,8 @@ float Pass::getReward(int tid) {
       VLOG(1) << "Pass Inactive: Ball Caught! Reward 1";
       pass_active_[tid] = false;
     } else if (ball_vel_mag <= -.8) {
-      reward -= 1.;
-      VLOG(1) << "Pass Inactive: Ball too slow. Reward -1";
+      reward -= .5;
+      VLOG(1) << "Pass Inactive: Ball too slow. Reward -.5";
       pass_active_[tid] = false;
     }
   }
@@ -328,5 +329,6 @@ float Pass::getReward(int tid) {
     old_teammate_prox_[tid] = 0;
     got_kickable_reward_[tid] = false;
   }
+  barrier_.wait();
   return reward;
 }
