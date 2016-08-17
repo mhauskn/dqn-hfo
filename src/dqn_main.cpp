@@ -64,6 +64,7 @@ DEFINE_string(curriculum, "random", "Curriculum to use.");
 // Global Variables Shared Between Threads
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
 std::mutex MTX;
+std::vector<float> EVAL_PERF; // Used to compute an average evaluation performance
 
 int NumStateFeatures(int num_players) {
   return 50 + 8 * (num_players);
@@ -174,7 +175,7 @@ std::pair<double,double> get_avg_std(std::vector<T> data) {
   return std::make_pair(avg, std);
 }
 
-double Evaluate(dqn::DQN& dqn, int tid, Task& task) {
+float Evaluate(dqn::DQN& dqn, int tid, Task& task) {
   LOG(INFO) << "[Agent" << tid << "] Evaluating for " << FLAGS_repeat_games
             << " episodes with epsilon = " << FLAGS_evaluate_with_epsilon
             << " task = " << task.getName();
@@ -199,6 +200,7 @@ double Evaluate(dqn::DQN& dqn, int tid, Task& task) {
   std::pair<double, double> succ_steps_dist = get_avg_std(successful_trial_steps);
   double avg_reward = score_dist.first;
   float goal_percent = goals / float(FLAGS_repeat_games);
+  float perf = avg_reward / task.getMaxExpectedReward();
   LOG(INFO) << "[Agent" << tid << "] Evaluation: "
             << "actor_iter = " << dqn.actor_iter()
             << ", avg_reward = " << avg_reward
@@ -209,8 +211,8 @@ double Evaluate(dqn::DQN& dqn, int tid, Task& task) {
             << ", success_std = " << succ_steps_dist.second
             << ", goal_perc = " << goal_percent
             << ", task = " << task.getName()
-            << ", performance = " << (avg_reward / task.getMaxExpectedReward());
-  return avg_reward;
+            << ", performance = " << perf;
+  return perf;
 }
 
 double Evaluate(dqn::DQN& dqn, int tid, Curriculum& tasks) {
@@ -353,7 +355,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     return;
   }
   int last_eval_iter = dqn->max_iter();
-  double best_score = std::numeric_limits<double>::min();
+  float best_perf = std::numeric_limits<float>::min();
   for (int episode = 0; dqn->max_iter() < FLAGS_max_iter; ++episode) {
     double epsilon = CalculateEpsilon(dqn->max_iter());
     Task& task = tasks.getTask(tid);
@@ -371,15 +373,29 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     }
     if (FLAGS_share_replay_memory) { MTX.unlock(); }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
-      double avg_score = Evaluate(*dqn, tid, tasks);
-      if (avg_score > best_score) {
-        LOG(INFO) << "[Agent " << tid << "] New High Score: " << avg_score
-                  << ", actor_iter = " << dqn->actor_iter()
-                  << ", critic_iter = " << dqn->critic_iter();
-        best_score = avg_score;
-        dqn::RemoveFilesMatchingRegexp(dqn->save_path() + "_HiScore.*");
-        std::string fname = dqn->save_path() + "_HiScore" + std::to_string(avg_score);
-        dqn->Snapshot(fname, false, false);
+      float perf = Evaluate(*dqn, tid, tasks);
+      MTX.lock(); // Accumulate Evaluation Scores for all agents
+      EVAL_PERF.push_back(perf);
+      MTX.unlock();
+      if (tid == 0) { // Tid[0] in charge of saving hi-scores
+        while (EVAL_PERF.size() < FLAGS_offense_agents) {
+          little_sleep(std::chrono::microseconds(100));
+        }
+        float avg_perf = std::accumulate(EVAL_PERF.begin(), EVAL_PERF.end(), 0.0)
+            / float(EVAL_PERF.size());
+        EVAL_PERF.clear();
+        if (avg_perf > best_perf) {
+          LOG(INFO) << "NewHighPerf: " << avg_perf
+                    << ", actor_iter = " << dqn->actor_iter()
+                    << ", critic_iter = " << dqn->critic_iter();
+          best_perf = avg_perf;
+          for (int i=0; i<FLAGS_offense_agents; ++i) {
+            dqn::DQN* d = DQNS[i];
+            dqn::RemoveFilesMatchingRegexp(d->save_path() + "_HiPerf_.*");
+            std::string fname = d->save_path() + "_HiPerf_" + std::to_string(avg_perf);
+            d->Snapshot(fname, false, false);
+          }
+        }
       }
       last_eval_iter = dqn->actor_iter();
     }
