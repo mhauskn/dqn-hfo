@@ -12,22 +12,27 @@ function monitor {
 }
 
 # 8-15-16
-JOB="Cross"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 2 -tasks cross`
-monitor $JOB $SAVE $PID
+# JOB="Cross"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 2 -tasks cross`
+# monitor $JOB $SAVE $PID
 
 # 8-13-16
-# JOB="MultiagentPass"
-# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 2 -tasks pass`
-# monitor $JOB $SAVE $PID
+JOB="MultiagentPassNaive"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 2 -tasks pass`
+monitor $JOB $SAVE $PID
+
+JOB="MultiagentPassShare2Layers"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 2 -tasks pass -share_actor_layers 2 -share_critic_layers 2`
+monitor $JOB $SAVE $PID
 
 # 8-12-16
-# JOB="SequentialCurriculum"
-# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks move_to_ball,dribble,kick_to_goal,soccer -curriculum sequential`
-# monitor $JOB $SAVE $PID
+JOB="SequentialCurriculum"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks move_to_ball,dribble,kick_to_goal,soccer -curriculum sequential`
+monitor $JOB $SAVE $PID
 
 # 8-1-16 Try multiple tasks
 # JOB="SingleAgentCurriculum"

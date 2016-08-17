@@ -59,14 +59,12 @@ Task::~Task() {
 
 pair<status_t, float> Task::step(int tid) {
   CHECK_GT(envs_.size(), tid);
-  float reward = getReward(tid);
-  episode_reward_[tid] += reward;
   status_t old_status = status_[tid];
   if (episode_over_ && old_status == IN_GAME) {
     stepUntilEpisodeEnd(tid);
-  } else {
-    stepThread(tid);
+    old_status = status_[tid];
   }
+  stepThread(tid);
   status_t current_status = status_[tid];
   if (current_status == SERVER_DOWN) {
     LOG(FATAL) << "Server Down! Exiting.";
@@ -80,6 +78,10 @@ pair<status_t, float> Task::step(int tid) {
   }
   if (current_status != IN_GAME) {
     episode_over_ = true;
+  }
+  float reward = getReward(tid);
+  episode_reward_[tid] += reward;
+  if (episode_over_) {
     for (int i=0; i<envs_.size(); ++i) {
       last_episode_reward_[i] = episode_reward_[i];
     }
@@ -227,7 +229,7 @@ float Dribble::getReward(int tid) {
   status_t s = status_[tid];
   if (s == GOAL || s == OUT_OF_BOUNDS || s == CAPTURED_BY_DEFENSE) {
     // Lose half of the total accrued reward for going out of bounds
-    reward -= 0.5 * episode_reward_[tid];
+    reward -= std::min(1., 0.5 * episode_reward_[tid]);
   }
   barrier_.wait();
   return reward;
@@ -287,7 +289,7 @@ float Pass::getReward(int tid) {
       reward += 1.;
       VLOG(1) << "Pass Inactive: Ball Caught! Reward 1";
       pass_active_[tid] = false;
-    } else if (ball_vel_mag <= -.8) {
+    } else if (ball_vel_mag <= -.8 && (ball_dist < ball_dist_teammate)) {
       reward -= .5;
       VLOG(1) << "Pass Inactive: Ball too slow. Reward -.5";
       pass_active_[tid] = false;
@@ -318,8 +320,8 @@ float Pass::getReward(int tid) {
 
   // Lose half of the accrued reward for ball out of bounds
   if (s == GOAL || s == OUT_OF_BOUNDS || s == CAPTURED_BY_DEFENSE) {
-    reward -= std::max(0., 0.5 * episode_reward_[tid]);
-    VLOG(1) << "reward -= OOB " << -std::max(0., 0.5 * episode_reward_[tid]);
+    reward = -std::max(0., 0.5 * episode_reward_[tid]);
+    VLOG(1) << "reward = OOB " << -std::max(0., 0.5 * episode_reward_[tid]);
   }
   if (episodeOver()) {
     pass_active_[tid] = false;

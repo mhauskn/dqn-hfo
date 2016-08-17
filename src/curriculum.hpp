@@ -64,6 +64,7 @@ class SequentialCurriculum : public Curriculum {
   int curr_task_indx_;
   std::deque<float> task_perf_queue_; // Used to average performance of task
   const static int kMaxQueueSize = 1000; // Size of task_perf_queue
+  float perf_sum_;
 };
 
 #endif
