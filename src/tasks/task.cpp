@@ -123,7 +123,8 @@ void Task::startServer(int port, int offense_agents, int offense_npcs,
       + " --ball-x-min " + std::to_string(ball_x_min)
       + " --ball-x-max " + std::to_string(ball_x_max)
       + " --offense-on-ball " + std::to_string(offense_on_ball)
-      + " --log-dir log/" + task_name_;
+      + " --log-dir log/" + task_name_
+      + " --message-size 1000";
   if (fullstate) { cmd += " --fullstate"; }
   if (!FLAGS_gui)      { cmd += " --headless"; }
   if (!FLAGS_log_game) { cmd += " --no-logging"; }

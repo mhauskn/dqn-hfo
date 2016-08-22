@@ -60,6 +60,8 @@ DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
 DEFINE_int32(defense_chasers, 0, "Number of chasers playing defense");
 DEFINE_string(tasks, "", "Tasks to use.");
 DEFINE_string(curriculum, "random", "Curriculum to use.");
+// Communication
+DEFINE_int32(comm_actions, 0, "Number of continuous actions used for communication.");
 
 // Global Variables Shared Between Threads
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
@@ -120,6 +122,11 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn::StateDataSp current_state_sp
         = std::make_shared<dqn::StateData>(dqn.state_size());
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
+    if (FLAGS_comm_actions > 0) {
+      const std::vector<float>& hear_state = dqn.GetHearFeatures(env);
+      std::copy(hear_state.begin(), hear_state.end(),
+                current_state_sp->end() - FLAGS_comm_actions);
+    }
     past_states.push_back(current_state_sp);
     CHECK_GE(past_states.size(), dqn::kStateInputCount);
     while (past_states.size() > dqn::kStateInputCount) {
@@ -129,8 +136,11 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     std::copy(past_states.begin(), past_states.end(), input_states.begin());
     dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
     VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
-    Action action = dqn::GetAction(actor_output);
+    Action action = dqn.GetAction(actor_output);
     env.act(action.action, action.arg1, action.arg2);
+    if (FLAGS_comm_actions > 0) {
+      env.say(dqn.GetSayMsg(actor_output));
+    }
     float reward = task.step(tid).second;
     steps++;
     VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
@@ -243,7 +253,12 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
-  int num_features = NumStateFeatures(4); // Enough for up to 3 other agents
+  int num_features = NumStateFeatures(2) + FLAGS_comm_actions; // Enough for 2 agents and comm
+  int num_discrete_actions = 3; // Dash, Turn, Kick
+  int num_continuous_actions = 5; // Parameters for the discrete actions
+  if (FLAGS_comm_actions > 0) {
+    num_continuous_actions += FLAGS_comm_actions; // Communication actions
+  }
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
@@ -252,7 +267,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   if (boost::filesystem::is_regular_file(actor_net_filename)) {
     caffe::ReadProtoFromTextFileOrDie(actor_net_filename.c_str(), actor_net_param);
   } else {
-    actor_net_param->CopyFrom(dqn::CreateActorNet(num_features));
+    actor_net_param->CopyFrom(dqn::CreateActorNet(
+        num_features, num_discrete_actions, num_continuous_actions));
     WriteProtoToTextFile(*actor_net_param, actor_net_filename.c_str());
   }
   caffe::NetParameter* critic_net_param = critic_solver_param.mutable_net_param();
@@ -260,7 +276,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   if (boost::filesystem::is_regular_file(critic_net_filename)) {
     caffe::ReadProtoFromTextFileOrDie(critic_net_filename.c_str(), critic_net_param);
   } else {
-    critic_net_param->CopyFrom(dqn::CreateCriticNet(num_features));
+    critic_net_param->CopyFrom(dqn::CreateCriticNet(
+        num_features, num_discrete_actions, num_continuous_actions));
     WriteProtoToTextFile(*critic_net_param, critic_net_filename.c_str());
   }
   actor_solver_param.set_snapshot_prefix((save_prefix + "_actor").c_str());
@@ -282,7 +299,9 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
 
   std::unique_ptr<dqn::DQN> dqn(new dqn::DQN(actor_solver_param,
                                              critic_solver_param,
-                                             save_prefix, num_features, tid));
+                                             save_prefix, num_features, tid,
+                                             num_discrete_actions,
+                                             num_continuous_actions));
 
   // Load actor/critic/memory. Try to load from resumables
   // first. Otherwise load from the args.

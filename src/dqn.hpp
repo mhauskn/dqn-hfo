@@ -22,15 +22,8 @@ namespace dqn {
 
 constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
-constexpr auto kActionSize = 4;
-constexpr auto kActionParamSize = 6;
 
-constexpr auto kActionInputDataSize = kMinibatchSize * kActionSize;
-constexpr auto kActionParamsInputDataSize = kMinibatchSize * kActionParamSize;
-constexpr auto kTargetInputDataSize = kMinibatchSize * kActionSize;
-constexpr auto kFilterInputDataSize = kMinibatchSize * kActionSize;
-
-using ActorOutput = std::array<float, kActionSize + kActionParamSize>;
+using ActorOutput = std::vector<float>;
 using StateData   = std::vector<float>;
 using StateDataSp = std::shared_ptr<StateData>;
 using InputStates = std::array<StateDataSp, kStateInputCount>;
@@ -62,7 +55,8 @@ class DQN {
 public:
   DQN(caffe::SolverParameter& actor_solver_param,
       caffe::SolverParameter& critic_solver_param,
-      std::string save_path, int state_size, int tid);
+      std::string save_path, int state_size, int tid,
+      int num_discrete_actions, int num_continuous_actions);
   ~DQN();
 
   // Benchmark the speed of updates
@@ -94,8 +88,17 @@ public:
   // Converts an ActorOutput into an action by samping over discrete actions
   Action SampleAction(const ActorOutput& actor_output);
 
+  // Converts an ActorOutput into an action by maxing over discrete actions
+  Action GetAction(const ActorOutput& actor_output);
+
   // Evaluate a state-action, returning the q-value.
   float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
+
+  // Returns the features heard from other players say messages
+  std::vector<float> GetHearFeatures(hfo::HFOEnvironment& env);
+
+  // Returns the outgoing message to be said in-game
+  std::string GetSayMsg(const ActorOutput& actor_output);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
@@ -165,6 +168,10 @@ protected:
       caffe::Net<float>& actor,
       const std::vector<InputStates>& states_batch);
 
+  std::vector<ActorOutput> getActorOutput(caffe::Net<float>& actor,
+                                          int batch_size,
+                                          std::string actions_blob_name);
+
   // Runs forward on critic to produce q-values. Actions inferred by actor.
   std::vector<float> CriticForwardThroughActor(
       caffe::Net<float>& critic, caffe::Net<float>& actor,
@@ -200,20 +207,25 @@ protected:
   float smoothed_critic_loss_, smoothed_actor_loss_;
   int last_snapshot_iter_;
   std::string save_path_;
+
   const int state_size_; // Number of state features
   const int state_input_data_size_;
+
+  const int kActionSize; // Number of discrete actions
+  const int kActionParamSize; // Number of continuous actions
+  const int kActionInputDataSize;
+  const int kActionParamsInputDataSize;
+  const int kTargetInputDataSize;
+  const int kFilterInputDataSize;
+
   int tid_;
   int unum_;
 };
 
-caffe::NetParameter CreateActorNet(int state_size);
-caffe::NetParameter CreateCriticNet(int state_size);
-
-/**
- * Converts an ActorOutput into an action by maxing over discrete actions
- */
-Action GetAction(const ActorOutput& actor_output);
-
+caffe::NetParameter CreateActorNet(
+    int state_size, int num_discrete_actions, int num_continuous_actions);
+caffe::NetParameter CreateCriticNet(
+    int state_size, int num_discrete_actions, int num_continuous_actions);
 /**
  * Returns a vector of filenames matching a given regular expression.
  */

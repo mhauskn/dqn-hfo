@@ -164,25 +164,22 @@ int GetParamOffset(const action_t action, const int arg_num = 0) {
     return -1;
   }
   switch (action) {
-    case DASH:
+    case 0: // Dash
       return arg_num;
-    case TURN:
+    case 1: // Turn
       return arg_num == 0 ? 2 : -1;
-    case TACKLE:
-      return arg_num == 0 ? 3 : -1;
-    case KICK:
-      return 4 + arg_num;
+    case 2: // Kick
+      return 3 + arg_num;
     default:
       LOG(FATAL) << "Unrecognized action: " << action;
   }
 }
 
 Action DQN::SampleAction(const ActorOutput& actor_output) {
-  float dash_prob = std::max(0., actor_output[DASH] + 1.0);
-  float turn_prob = std::max(0., actor_output[TURN] + 1.0);
-  float tackle_prob = 0; // Remove tackle action
-  float kick_prob = std::max(0., actor_output[KICK] + 1.0);
-  std::discrete_distribution<int> dist { dash_prob, turn_prob, tackle_prob, kick_prob };
+  float dash_prob = std::max(0., actor_output[0] + 1.0);
+  float turn_prob = std::max(0., actor_output[1] + 1.0);
+  float kick_prob = std::max(0., actor_output[2] + 1.0);
+  std::discrete_distribution<int> dist { dash_prob, turn_prob, kick_prob };
   action_t max_act = (action_t) dist(random_engine);
   Action action;
   action.action = max_act;
@@ -193,33 +190,67 @@ Action DQN::SampleAction(const ActorOutput& actor_output) {
   return action;
 }
 
-Action GetAction(const ActorOutput& actor_output) {
+Action DQN::GetAction(const ActorOutput& actor_output) {
   ActorOutput copy(actor_output); // TODO: Remove hack
-  copy[TACKLE] = -99999; // Remove tackle action.
   Action action;
-  action_t max_act = (action_t) std::distance(copy.begin(), std::max_element(
+  action_t action_indx = (action_t) std::distance(copy.begin(), std::max_element(
       copy.begin(), copy.begin() + kActionSize));
-  action.action = max_act;
-  int arg1_offset = GetParamOffset(max_act, 0); CHECK_GE(arg1_offset, 0);
+  switch (action_indx) {
+    case 0:
+      action.action = DASH;
+      break;
+    case 1:
+      action.action = TURN;
+      break;
+    case 2:
+      action.action = KICK;
+      break;
+    default:
+      LOG(FATAL) << "Unrecognized action_indx: " << action_indx;
+  }
+  int arg1_offset = GetParamOffset(action_indx, 0); CHECK_GE(arg1_offset, 0);
   action.arg1 = actor_output[kActionSize + arg1_offset];
-  int arg2_offset = GetParamOffset(max_act, 1);
+  int arg2_offset = GetParamOffset(action_indx, 1);
   action.arg2 = arg2_offset < 0 ? 0 : actor_output[kActionSize + arg2_offset];
   return action;
 }
 
+std::vector<float> DQN::GetHearFeatures(HFOEnvironment& env) {
+  std::vector<float> vect;
+  std::string msg = env.hear();
+  std::stringstream ss(msg);
+  float f;
+  while (ss >> f) {
+    vect.push_back(f);
+    if (ss.peek() == ' ') {
+      ss.ignore();
+    }
+  }
+  VLOG(1) << "Agent" << tid_ << " heard " << msg;
+  return vect;
+}
+
+std::string DQN::GetSayMsg(const ActorOutput& actor_output) {
+  std::string msg;
+  // Communication parameters start after the 5 continuous parameters
+  for (int i = 5; i < kActionParamSize; ++i) {
+    msg.append(std::to_string(actor_output[i]) + " ");
+  }
+  VLOG(1) << "Agent" << tid_ << " said " << msg;
+  return msg;
+}
+
 std::string PrintActorOutput(const ActorOutput& actor_output) {
-  return "Dash(" + std::to_string(actor_output[4]) + ", " + std::to_string(actor_output[5]) + ")="
-      + std::to_string(actor_output[0]) + ", Turn(" + std::to_string(actor_output[6]) + ")="
-      + std::to_string(actor_output[1]) + ", Tackle(" + std::to_string(actor_output[7]) + ")="
-      + std::to_string(actor_output[2]) + ", Kick(" + std::to_string(actor_output[8])
-      + ", " + std::to_string(actor_output[9]) + ")=" + std::to_string(actor_output[3]);
+  return "Dash(" + std::to_string(actor_output[3]) + ", " + std::to_string(actor_output[4]) + ")="
+      + std::to_string(actor_output[0]) + ", Turn(" + std::to_string(actor_output[5]) + ")="
+      + std::to_string(actor_output[1]) + ", Kick(" + std::to_string(actor_output[6])
+      + ", " + std::to_string(actor_output[7]) + ")=" + std::to_string(actor_output[2]);
 }
 std::string PrintActorOutput(const float* actions, const float* params) {
   return "Dash(" + std::to_string(params[0]) + ", " + std::to_string(params[1]) + ")="
       + std::to_string(actions[0]) + ", Turn(" + std::to_string(params[2]) + ")="
-      + std::to_string(actions[1]) + ", Tackle(" + std::to_string(params[3]) + ")="
-      + std::to_string(actions[2]) + ", Kick(" + std::to_string(params[4])
-      + ", " + std::to_string(params[5]) + ")=" + std::to_string(actions[3]);
+      + std::to_string(actions[1]) + ", Kick(" + std::to_string(params[3])
+      + ", " + std::to_string(params[4]) + ")=" + std::to_string(actions[2]);
 }
 
 void PopulateLayer(caffe::LayerParameter& layer,
@@ -415,7 +446,9 @@ std::string Tower(caffe::NetParameter& np,
   return input_name;
 }
 
-caffe::NetParameter CreateActorNet(int state_size) {
+caffe::NetParameter CreateActorNet(int state_size,
+                                   int num_discrete_actions,
+                                   int num_continuous_actions) {
   caffe::NetParameter np;
   np.set_name("Actor");
   np.set_force_backward(true);
@@ -423,12 +456,16 @@ caffe::NetParameter CreateActorNet(int state_size) {
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
   SilenceLayer(np, "silence", {"dummy1"}, {}, boost::none);
   std::string tower_top = Tower(np, "", states_blob_name, {1024, 512, 256, 128});
-  IPLayer(np, "action_layer", {tower_top}, {"actions"}, boost::none, 4);
-  IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none, 6);
+  IPLayer(np, "action_layer", {tower_top}, {"actions"}, boost::none,
+          num_discrete_actions);
+  IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none,
+          num_continuous_actions);
   return np;
 }
 
-caffe::NetParameter CreateCriticNet(int state_size) {
+caffe::NetParameter CreateCriticNet(int state_size,
+                                    int num_discrete_actions,
+                                    int num_continuous_actions) {
   caffe::NetParameter np;
   np.set_name("Critic");
   np.set_force_backward(true);
@@ -436,10 +473,10 @@ caffe::NetParameter CreateCriticNet(int state_size) {
                   boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
   MemoryDataLayer(np, action_input_layer_name,
                   {actions_blob_name,"dummy2"},
-                  boost::none, {kMinibatchSize, kStateInputCount, kActionSize, 1});
+                  boost::none, {kMinibatchSize, kStateInputCount, num_discrete_actions, 1});
   MemoryDataLayer(np, action_params_input_layer_name,
                   {action_params_blob_name,"dummy3"},
-                  boost::none, {kMinibatchSize, kStateInputCount, kActionParamSize, 1});
+                  boost::none, {kMinibatchSize, kStateInputCount, num_continuous_actions, 1});
   MemoryDataLayer(np, target_input_layer_name, {targets_blob_name,"dummy4"},
                   boost::none, {kMinibatchSize, 1, 1, 1});
   SilenceLayer(np, "silence", {"dummy1","dummy2","dummy3","dummy4"}, {}, boost::none);
@@ -456,7 +493,8 @@ caffe::NetParameter CreateCriticNet(int state_size) {
 
 DQN::DQN(caffe::SolverParameter& actor_solver_param,
          caffe::SolverParameter& critic_solver_param,
-         std::string save_path, int state_size, int tid) :
+         std::string save_path, int state_size, int tid,
+         int num_discrete_actions, int num_continuous_actions) :
         actor_solver_param_(actor_solver_param),
         critic_solver_param_(critic_solver_param),
         replay_memory_capacity_(FLAGS_memory),
@@ -469,6 +507,12 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
         save_path_(save_path),
         state_size_(state_size),
         state_input_data_size_(kMinibatchSize * state_size * kStateInputCount),
+        kActionSize(num_discrete_actions),
+        kActionParamSize(num_continuous_actions),
+        kActionInputDataSize(kMinibatchSize * num_discrete_actions),
+        kActionParamsInputDataSize(kMinibatchSize * num_continuous_actions),
+        kTargetInputDataSize(kMinibatchSize * num_discrete_actions),
+        kFilterInputDataSize(kMinibatchSize * num_discrete_actions),
         tid_(tid),
         unum_(0) {
   if (FLAGS_seed <= 0) {
@@ -662,7 +706,7 @@ void DQN::Initialize() {
 }
 
 ActorOutput DQN::GetRandomActorOutput() {
-  ActorOutput actor_output;
+  ActorOutput actor_output(kActionSize + kActionParamSize, 0.);
   for (int i = 0; i < kActionSize; ++i) {
     actor_output[i] = std::uniform_real_distribution<float>(-1.0,1.0)(random_engine);
   }
@@ -672,12 +716,15 @@ ActorOutput DQN::GetRandomActorOutput() {
       std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
   actor_output[kActionSize + 2] = // Turn Angle
       std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-  actor_output[kActionSize + 3] = // Tackle Angle
-      std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
-  actor_output[kActionSize + 4] = // Kick Power
+  actor_output[kActionSize + 3] = // Kick Power
       std::uniform_real_distribution<float>(0.0, 100.0)(random_engine);
-  actor_output[kActionSize + 5] = // Kick Angle
+  actor_output[kActionSize + 4] = // Kick Angle
       std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+  // Communication Actions
+  for (int i = 5; i < kActionParamSize; ++i) {
+    actor_output[kActionSize + i] =
+        std::uniform_real_distribution<float>(-1.0,1.0)(random_engine);
+  }
   return actor_output;
 }
 
@@ -716,13 +763,13 @@ ActorOutput DQN::SelectActionGreedily(caffe::Net<float>& actor,
       actor, std::vector<InputStates>{{last_states}}).front();
 }
 
-std::vector<ActorOutput> getActorOutput(caffe::Net<float>& actor,
-                                        int batch_size,
-                                        std::string actions_blob_name) {
+std::vector<ActorOutput> DQN::getActorOutput(caffe::Net<float>& actor,
+                                             int batch_size,
+                                             std::string actions_blob_name) {
   std::vector<ActorOutput> actor_outputs(batch_size);
   const auto actions_blob = actor.blob_by_name(actions_blob_name);
   for (int n = 0; n < batch_size; ++n) {
-    ActorOutput actor_output;
+    ActorOutput actor_output(kActionSize + kActionParamSize, 0.);
     for (int c = 0; c < kActionSize + kActionParamSize; ++c) {
       actor_output[c] = actions_blob->data_at(n,c,0,0);
     }
@@ -753,7 +800,7 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   const auto actions_blob = actor.blob_by_name(actions_blob_name);
   const auto action_params_blob = actor.blob_by_name(action_params_blob_name);
   for (int n = 0; n < states_batch.size(); ++n) {
-    ActorOutput actor_output;
+    ActorOutput actor_output(kActionSize + kActionParamSize, 0.);
     for (int c = 0; c < kActionSize; ++c) {
       actor_output[c] = actions_blob->data_at(n,c,0,0);
     }
@@ -942,10 +989,12 @@ std::pair<float,float> DQN::UpdateActorCritic() {
       float diff = param_diff[offset];
       float output = actor_output_batch[n][h+kActionSize];
       float min, max;
-      if (h == 0 || h == 4) {
-        min = 0; max = 100;
-      } else if (h == 1 || h == 2 || h == 3 || h == 5) {
-        min = -180; max = 180;
+      if (h == 0 || h == 3) {
+        min = 0; max = 100; // Power parameters
+      } else if (h == 1 || h == 2 || h == 4) {
+        min = -180; max = 180; // Direction parameters
+      } else {
+        min = -1; max = 1; // Communication parameters
       }
       if (diff < 0) {
         diff *= (max - output) / (max - min);
@@ -1211,7 +1260,7 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     CHECK_EQ(past_states.size(), kStateInputCount);
     InputStates& states = std::get<0>(t);
     std::copy(past_states.begin(), past_states.end(), states.begin());
-    in.read((char*)&std::get<1>(t), sizeof(ActorOutput));
+    in.read((char*)&std::get<1>(t), (kActionSize + kActionParamSize) * sizeof(float));
     in.read((char*)&std::get<2>(t), sizeof(float));
     in.read((char*)&std::get<3>(t), sizeof(float));
     std::get<4>(t) = boost::none;
