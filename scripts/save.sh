@@ -65,3 +65,11 @@ do
         grep "Episode [0-9]*,.*task = $task" $LOGS | lmj-plot -m '\[Agent0\] Episode (\d+), reward = (\S+),.*' '\[Agent1\] Episode (\d+), reward = (\S+),.*' --xlabel Episode --ylabel Reward --title "$PREFIX $task reward" -g -T $MARKERS $LEGEND -c Dark2 -o $SAVE"_"$task"_reward.png" &
     fi
 done
+
+grep "Evaluation:" $LOGS | lmj-plot -m \
+    '\[Agent0\].*actor_iter = (\d+),.*task = move_to_ball, performance = (\S+)' \
+    '\[Agent0\].*actor_iter = (\d+),.*task = kick_to_goal, performance = (\S+)' \
+    '\[Agent0\].*actor_iter = (\d+),.*task = dribble, performance = (\S+)' \
+    '\[Agent0\].*actor_iter = (\d+),.*task = pass, performance = (\S+)' \
+    '\[Agent0\].*actor_iter = (\d+),.*task = soccer, performance = (\S+)' \
+    --xlabel 'Iteration' --ylabel 'Performance' --title "$PREFIX Eval Performance" -g -T $MARKERS --legend br -c Set3 -f .5 -o $SAVE"_eval_perf.png" &
