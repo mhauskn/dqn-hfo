@@ -101,38 +101,29 @@ void RandomCurriculum::queueTasks() {
 
 SequentialCurriculum::SequentialCurriculum(int num_agents) :
     Curriculum(num_agents),
-    curr_task_indx_(0),
-    perf_sum_(0)
+    curr_task_indx_(0)
 {
 }
 
 void SequentialCurriculum::queueTasks() {
   Task* curr_task = all_tasks_[curr_task_indx_];
-  float ep_rewards = 0;
-  for (int i=0; i<curr_task->getNumAgents(); ++i) {
-    ep_rewards += curr_task->getLastEpisodeReward(i);
-  }
-  ep_rewards /= float(curr_task->getNumAgents());
-  float performance = ep_rewards / curr_task->getMaxExpectedReward();
-
-  perf_sum_ += performance;
-  task_perf_queue_.push_back(performance);
-  while (task_perf_queue_.size() > kMaxQueueSize) {
-    perf_sum_ -= task_perf_queue_.front();
-    task_perf_queue_.pop_front();
-  }
-
-  float avg_perf = perf_sum_ / float(kMaxQueueSize);
-  LOG(INFO) << "[SequentialCurriculum] Task: " << curr_task->getName()
-            << " avg_perf " << avg_perf;
-  if (avg_perf >= FLAGS_performance_threshold) {
+  task_eval_perf_.resize(all_tasks_.size(), 0.);
+  float curr_task_perf = task_eval_perf_[curr_task_indx_];
+  if (curr_task_perf >= FLAGS_performance_threshold) {
     curr_task_indx_ = min(int(all_tasks_.size() - 1), curr_task_indx_ + 1);
-    task_perf_queue_.clear();
-    perf_sum_ = 0;
     LOG(INFO) << "SequentialCurriculum: Graduated from task " << curr_task->getName()
-              << " with avg_performance " << avg_perf;
+              << " with avg_performance " << curr_task_perf;
   }
   for (int i=0; i<current_tasks_.size(); ++i) {
     current_tasks_[i] = all_tasks_[curr_task_indx_];
+  }
+}
+
+void SequentialCurriculum::addEvalPerf(const Task& task, float perf) {
+  task_eval_perf_.resize(all_tasks_.size(), 0.);
+  for (int i=0; i<all_tasks_.size(); ++i) {
+    if (&task == all_tasks_[i]) {
+      task_eval_perf_[i] = perf;
+    }
   }
 }

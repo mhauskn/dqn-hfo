@@ -228,7 +228,9 @@ float Evaluate(dqn::DQN& dqn, int tid, Task& task) {
 double Evaluate(dqn::DQN& dqn, int tid, Curriculum& tasks) {
   std::vector<double> task_perf;
   for (Task* t : tasks.getTasks()) {
-    task_perf.push_back(Evaluate(dqn, tid, *t));
+    float perf = Evaluate(dqn, tid, *t);
+    tasks.addEvalPerf(*t, perf);
+    task_perf.push_back(perf);
   }
   return get_avg_std(task_perf).first;
 }

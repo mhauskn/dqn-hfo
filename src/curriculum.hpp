@@ -23,12 +23,16 @@ class Curriculum {
   // Delete a task from the curriculum
   void removeTask(std::string task_name);
 
+  // Returns the next task to be performed
   Task& getTask(int tid);
 
   // Returns a task by name
   Task& getTask(std::string task_name);
 
   inline std::vector<Task*>& getTasks() { return all_tasks_; }
+
+  // Add the latest performance of the agent when evaluated on a task
+  virtual void addEvalPerf(const Task& task, float perf) {};
 
  protected:
   virtual void queueTasks() = 0;
@@ -59,12 +63,13 @@ class SequentialCurriculum : public Curriculum {
  public:
   SequentialCurriculum(int num_agents);
 
+  // Add the latest performance of the agent when evaluated on a task
+  virtual void addEvalPerf(const Task& task, float perf);
+
  protected:
   virtual void queueTasks();
   int curr_task_indx_;
-  std::deque<float> task_perf_queue_; // Used to average performance of task
-  const static int kMaxQueueSize = 1000; // Size of task_perf_queue
-  float perf_sum_;
+  std::vector<float> task_eval_perf_;
 };
 
 #endif
