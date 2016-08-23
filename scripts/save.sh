@@ -31,6 +31,9 @@ do
     fi
 done
 
+# Determine the tasks being performed
+TASKS=`grep "Adding Task" $LOGS | awk 'NF>1{print $NF}'`
+
 MARKERS="-p o- v-"
 COLOR="-c Set2"
 # Only add a legend if we have two or more agents
@@ -66,10 +69,14 @@ do
     fi
 done
 
-grep "Evaluation:" $LOGS | lmj-plot -m \
-    '\[Agent0\].*actor_iter = (\d+),.*task = move_to_ball, performance = (\S+)' \
-    '\[Agent0\].*actor_iter = (\d+),.*task = kick_to_goal, performance = (\S+)' \
-    '\[Agent0\].*actor_iter = (\d+),.*task = dribble, performance = (\S+)' \
-    '\[Agent0\].*actor_iter = (\d+),.*task = pass, performance = (\S+)' \
-    '\[Agent0\].*actor_iter = (\d+),.*task = soccer, performance = (\S+)' \
-    --xlabel 'Iteration' --ylabel 'Performance' --title "$PREFIX Eval Performance" -g -T $MARKERS --legend br -c Set3 -f .5 -o $SAVE"_eval_perf.png" &
+# Plot Eval Performance for all agents across tasks
+for i in `seq 0 $(($AGENTS-1))`;
+do
+    PLT="grep 'Evaluation:' $LOGS | lmj-plot -m "
+    for task in $TASKS;
+    do
+        PLT+="'\[Agent$i\].*actor_iter = (\d+),.*task = $task, performance = (\S+)' "
+    done
+    PLT+="--xlabel 'Iteration' --ylabel 'Performance' --title '$PREFIX Agent$i EvalPerf' -g -T $MARKERS --legend br -n $TASKS -c Set3 -f .5 -o ${SAVE}_agent${i}_eval_perf.png &"
+    eval $PLT
+done
