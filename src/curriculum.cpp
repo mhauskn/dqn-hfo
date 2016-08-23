@@ -62,6 +62,8 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
     task = new KickToGoal(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Soccer::taskName()) == 0) {
     task = new Soccer(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(SoccerEasy::taskName()) == 0) {
+    task = new SoccerEasy(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Dribble::taskName()) == 0) {
     task = new Dribble(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Pass::taskName()) == 0) {

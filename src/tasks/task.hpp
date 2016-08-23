@@ -37,6 +37,9 @@ class Task {
                    int frames_per_trial=500, float ball_x_min=0., float ball_x_max=0.2,
                    int offense_on_ball=0);
   virtual void connectToServer(int tid);
+  static float getDist(float o1_dist, float o1_ang_sin, float o1_ang_cos,
+                       float o2_dist, float o2_ang_sin, float o2_ang_cos);
+
 
  protected:
   std::string task_name_;
@@ -103,6 +106,26 @@ class Soccer : public Task {
 
  protected:
   virtual float getReward(int tid) override;
+};
+
+/**
+ * The original soccer task features a more informative reward signal
+ * that rewards the agent for going to the ball, and kicking to goal.
+ */
+class SoccerEasy : public Soccer {
+ public:
+  SoccerEasy(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 8; }
+  static std::string taskName() { return "soccer_easy"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+
+  std::vector<bool> first_step_;
+  std::vector<float> old_ball_prox_;
+  std::vector<bool> old_kickable_;
+  std::vector<float> old_ball_dist_goal_;
+  std::vector<bool> got_kickable_reward_;
 };
 
 /**

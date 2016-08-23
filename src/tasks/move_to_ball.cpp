@@ -39,6 +39,21 @@ float MoveToBall::getReward(int tid) {
   old_ball_prox_[tid] = ball_proximity;
   float reward = ball_prox_delta_[tid];
 
+  // If there are two agents, only the one closer to the ball is
+  // rewarded for approaching the ball.
+  if (getNumAgents() > 1) {
+    CHECK_GE(current_state.size(), 60);
+    float ball_dist = 1. - (ball_proximity+1.)/2.;
+    float teammate_proximity = current_state[60];
+    float teammate_dist = 1. - (teammate_proximity+1.)/2.;
+    float ball_dist_teammate = getDist(
+        ball_dist, current_state[51], current_state[52],
+        teammate_dist, current_state[58], current_state[59]);
+    if (ball_dist >= ball_dist_teammate) {
+      reward = -ball_prox_delta_[tid];
+    }
+  }
+
   if (episodeOver()) {
     old_ball_prox_[tid] = 0;
     ball_prox_delta_[tid] = 0;

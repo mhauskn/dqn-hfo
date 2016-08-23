@@ -29,10 +29,10 @@ function monitor {
 # monitor $JOB $SAVE $PID
 
 # 8-12-16
-JOB="SequentialCurriculum"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks move_to_ball,dribble,kick_to_goal,soccer -curriculum sequential`
-monitor $JOB $SAVE $PID
+# JOB="SequentialCurriculum"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks move_to_ball,dribble,kick_to_goal,soccer -curriculum sequential`
+# monitor $JOB $SAVE $PID
 
 # 8-1-16 Try multiple tasks
 # JOB="SingleAgentCurriculum"
@@ -40,33 +40,33 @@ monitor $JOB $SAVE $PID
 # PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks move_to_ball,kick_to_goal,dribble,soccer`
 # monitor $JOB $SAVE $PID
 
-JOB="Soccer_sanity"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 1 -tasks soccer`
-monitor $JOB $SAVE $PID
+# JOB="Soccer_sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 1 -tasks soccer`
+# monitor $JOB $SAVE $PID
 
 # 7-26-16 Sanity check pass task
-JOB="Pass_sanity"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 1 -tasks pass`
-monitor $JOB $SAVE $PID
+# JOB="Pass_sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 5000000 -offense_agents 1 -tasks pass`
+# monitor $JOB $SAVE $PID
 
 # 7-22-16 Sanity check dribble
-JOB="Dribble_sanity"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks dribble`
-monitor $JOB $SAVE $PID
+# JOB="Dribble_sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks dribble`
+# monitor $JOB $SAVE $PID
 
-JOB="KickToGoal_sanity"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks kick_to_goal`
-monitor $JOB $SAVE $PID
+# JOB="KickToGoal_sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks kick_to_goal`
+# monitor $JOB $SAVE $PID
 
 # 7-15-16 Sanity check the task system
-JOB="MoveToBall_sanity"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks move_to_ball`
-monitor $JOB $SAVE $PID
+# JOB="MoveToBall_sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 300000 -tasks move_to_ball`
+# monitor $JOB $SAVE $PID
 
 # 7-9-16 Train against a defense chaser
 # JOB="Chaser_2v0"
