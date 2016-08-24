@@ -14,19 +14,39 @@ function monitor {
 
 
 # 8-23-16
-JOB="MoveToBall_NoComm"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks move_to_ball`
-monitor $JOB $SAVE $PID
-
-JOB="MoveToBall_CommAct1"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks move_to_ball -comm_actions 1`
-monitor $JOB $SAVE $PID
-
-# JOB="SoccerEasy_sanity"
+# JOB="MoveToBall_NoComm"
 # SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 2000000 -offense_agents 1 -tasks soccer_easy`
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks move_to_ball`
+# monitor $JOB $SAVE $PID
+
+# JOB="MoveToBall_CommAct1"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks move_to_ball -comm_actions 1`
+# monitor $JOB $SAVE $PID
+
+JOB="SoccerEasy_sanity"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 2000000 -offense_agents 1 -tasks soccer_easy`
+monitor $JOB $SAVE $PID
+
+# JOB="MirrorActions_NoComm"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions`
+# monitor $JOB $SAVE $PID
+
+# JOB="MirrorActions_CommAct1"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions -comm_actions 1`
+# monitor $JOB $SAVE $PID
+
+# JOB="MirrorActions_ShareLayers2_NoComm"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions -share_actor_layers 2 -share_critic_layers 2`
+# monitor $JOB $SAVE $PID
+
+# JOB="MirrorActions_ShareLayers2_CommAct1"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions -share_actor_layers 2 -share_critic_layers 2 -comm_actions 1`
 # monitor $JOB $SAVE $PID
 
 # 8-15-16

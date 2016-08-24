@@ -46,9 +46,6 @@ fi
 # Plot Reward
 grep "Episode [0-9]*, reward" $LOGS | lmj-plot -m '\[Agent0\] .* reward = (\S+),.*' '\[Agent1\] .* reward = (\S+),.*' --xlabel Episode --ylabel Reward --title $PREFIX -g -T $MARKERS $LEGEND -c Dark2 -o $SAVE"_reward.png" &
 
-# Plot Evaluation Reward
-grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*avg_reward = (\S+),.*reward_std = (\S+),.*' '\[Agent1\].*actor_iter = (\d+),.*avg_reward = (\S+),.*reward_std = (\S+),.*' --xlabel 'Iteration' --ylabel 'Average Reward' --title "$PREFIX Evaluation" -g -T $MARKERS $LEGEND -c Dark2 -f .5 -o $SAVE"_eval_reward.png" &
-
 # Plot Evaluation Average Steps
 grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*avg_steps = (\S+),.*steps_std = (\S+),.*' '\[Agent1\].*actor_iter = (\d+),.*avg_steps = (\S+),.*steps_std = (\S+),.*' --xlabel 'Iteration' --ylabel 'Average Steps' --title "$PREFIX Evaluation" -g -T $MARKERS $LEGEND -c Accent -f .5 -o $SAVE"_eval_steps.png" &
 
@@ -61,22 +58,46 @@ grep "Critic Iteration" $LOGS | lmj-plot -m '\[Agent0\] Critic Iteration (\d+), 
 # Plot avg q_value
 grep "Actor Iteration" $LOGS | lmj-plot -m '\[Agent0\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' '\[Agent1\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' --num-x-ticks 8 --xlabel 'Iteration' --ylabel 'Actor Average Q-Value' --title $PREFIX -g -T --log y $MARKERS $LEGEND -c Pastel2 -o $SAVE"_avgq.png" &
 
-tasks="move_to_ball dribble kick_to_goal soccer pass"
-for task in $tasks;
-do
-    if grep -q "Episode [0-9]*,.*task = $task" $LOGS; then
-        grep "Episode [0-9]*,.*task = $task" $LOGS | lmj-plot -m '\[Agent0\] Episode (\d+), reward = (\S+),.*' '\[Agent1\] Episode (\d+), reward = (\S+),.*' --xlabel Episode --ylabel Reward --title "$PREFIX $task reward" -g -T $MARKERS $LEGEND -c Dark2 -o $SAVE"_"$task"_reward.png" &
-    fi
-done
 
-# Plot Eval Performance for all agents across tasks
-for i in `seq 0 $(($AGENTS-1))`;
-do
-    PLT="grep 'Evaluation:' $LOGS | lmj-plot -m "
+if [[ ( "${#TASKS[@]}" -gt 1 ) && ( "$AGENTS" -eq 1 ) ]] # Single agent, many tasks
+then
+    # Plot Eval Performance for across tasks
+    for i in `seq 0 $(($AGENTS-1))`;
+    do
+        PLT="grep 'Evaluation:' $LOGS | lmj-plot -m "
+        for task in $TASKS;
+        do
+            PLT+="'\[Agent$i\].*actor_iter = (\d+),.*task = $task, performance = (\S+)' "
+        done
+        PLT+="--xlabel 'Iteration' --ylabel 'Performance' --title '$PREFIX Agent$i EvalPerf' -g -T $MARKERS --legend br -n $TASKS -c Set3 -f .5 -o ${SAVE}_agent${i}_eval_perf.png &"
+        eval $PLT
+    done
+fi
+
+
+if [ "${#TASKS[@]}" -eq 1 ] # Single task
+then
+    # Plot Eval Reward across agents for single task
     for task in $TASKS;
     do
-        PLT+="'\[Agent$i\].*actor_iter = (\d+),.*task = $task, performance = (\S+)' "
+        PLT="grep 'Evaluation:' $LOGS | lmj-plot -m "
+        for i in `seq 0 $(($AGENTS-1))`;
+        do
+            PLT+="'\[Agent$i\].*actor_iter = (\d+),.*avg_reward = (\S+),.*reward_std = (\S+),.*' "
+        done
+        PLT+="--xlabel 'Iteration' --ylabel 'Average Reward' --title '$PREFIX EvalReward' -g -T $MARKERS $LEGEND -c Dark2 -f .5 -o ${SAVE}_${task}_eval_reward.png &"
+        eval $PLT
     done
-    PLT+="--xlabel 'Iteration' --ylabel 'Performance' --title '$PREFIX Agent$i EvalPerf' -g -T $MARKERS --legend br -n $TASKS -c Set3 -f .5 -o ${SAVE}_agent${i}_eval_perf.png &"
-    eval $PLT
-done
+
+    # Plot Eval Performance across agents for single task
+    for task in $TASKS;
+    do
+        PLT="grep 'Evaluation:' $LOGS | lmj-plot -m "
+        for i in `seq 0 $(($AGENTS-1))`;
+        do
+            PLT+="'\[Agent$i\].*actor_iter = (\d+),.*task = $task, performance = (\S+)' "
+        done
+        PLT+="--xlabel 'Iteration' --ylabel 'Performance' --title '$PREFIX $task EvalPerf' -g -T $MARKERS $LEGEND -c Set2 -f .5 -o ${SAVE}_${task}_eval_perf.png &"
+        eval $PLT
+    done
+fi

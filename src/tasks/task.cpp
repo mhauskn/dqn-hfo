@@ -6,6 +6,7 @@ using namespace hfo;
 DEFINE_bool(gui, false, "Open a GUI window.");
 DEFINE_bool(log_game, false, "Log the HFO game.");
 DEFINE_bool(verbose, false, "Server prints verbose output.");
+DEFINE_int32(message_size, 1000, "Max size of messages.");
 
 bool FINISHED = false;
 
@@ -55,6 +56,16 @@ Task::~Task() {
   for (std::thread& t : threads_) {
     t.join();
   }
+}
+
+void Task::act(int tid, action_t action, float arg1, float arg2) {
+  CHECK_GT(envs_.size(), tid);
+  envs_[tid].act(action, arg1, arg2);
+}
+
+void Task::say(int tid, const string& message) {
+  CHECK_GT(envs_.size(), tid);
+  envs_[tid].say(message);
 }
 
 pair<status_t, float> Task::step(int tid) {
@@ -123,8 +134,8 @@ void Task::startServer(int port, int offense_agents, int offense_npcs,
       + " --ball-x-min " + std::to_string(ball_x_min)
       + " --ball-x-max " + std::to_string(ball_x_max)
       + " --offense-on-ball " + std::to_string(offense_on_ball)
-      + " --log-dir log/" + task_name_
-      + " --message-size 1000";
+      + " --message-size " + std::to_string(FLAGS_message_size)
+      + " --log-dir log/" + task_name_;
   if (fullstate) { cmd += " --fullstate"; }
   if (!FLAGS_gui)      { cmd += " --headless"; }
   if (!FLAGS_log_game) { cmd += " --no-logging"; }
@@ -201,13 +212,22 @@ float Soccer::getReward(int tid) {
 }
 
 SoccerEasy::SoccerEasy(int server_port, int offense_agents, int defense_agents) :
-    Soccer(server_port, offense_agents, defense_agents),
+    Task(taskName(), offense_agents, defense_agents),
     first_step_(offense_agents + defense_agents, true),
     old_ball_prox_(offense_agents + defense_agents, 0.),
     old_kickable_(offense_agents + defense_agents, false),
     old_ball_dist_goal_(offense_agents + defense_agents, 0.),
     got_kickable_reward_(offense_agents + defense_agents, false)
-{}
+{
+  int max_steps = 500;
+  startServer(server_port, offense_agents, 0, defense_agents, 0, true,
+              max_steps);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
 
 float SoccerEasy::getReward(int tid) {
   CHECK_GT(envs_.size(), tid);
@@ -237,22 +257,27 @@ float SoccerEasy::getReward(int tid) {
 
   // Move to ball reward
   if (pob.unum < 0 || pob.unum == env.getUnum()) {
+    VLOG(1) << "MoveToBallReward: " << ball_prox_delta;
     reward += ball_prox_delta;
   }
   // Kickable reward
   if (kickable && !old_kickable_[tid] && !got_kickable_reward_[tid]) {
+    VLOG(1) << "KickableReward: 1";
     reward += 1.0;
     got_kickable_reward_[tid] = true;
   }
   // Kick to goal reward
   if (pob.unum == env.getUnum()) {
-    reward -= ball_dist_goal_delta;
+    VLOG(1) << "KickToGoalReward: " << (3. * -ball_dist_goal_delta);
+    reward -= 3. * ball_dist_goal_delta;
   }
   // Goal Reward
   if (status_[tid] == GOAL) {
     if (pob.unum == env.getUnum()) {
+      VLOG(1) << "GoalReward: 5";
       reward += 5.;
     } else {
+      VLOG(1) << "TeammateGoalReward: 1";
       reward += 1.;
     }
   }
@@ -445,5 +470,56 @@ float Cross::getReward(int tid) {
   }
 
   barrier_.wait();
+  return reward;
+}
+
+MirrorActions::MirrorActions(int server_port, int offense_agents,
+                             int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents),
+    actions_(offense_agents + defense_agents, NOOP),
+    old_actions_(offense_agents + defense_agents, NOOP)
+{
+  CHECK_EQ(offense_agents, 2);
+  int max_steps = 100;
+  startServer(server_port, 2, 0, defense_agents, 0, true, max_steps);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
+
+void MirrorActions::act(int tid, hfo::action_t action, float arg1, float arg2) {
+  CHECK_GT(envs_.size(), tid);
+  envs_[tid].act(action, arg1, arg2);
+  actions_[tid] = action;
+}
+
+float MirrorActions::getReward(int tid) {
+  barrier_.wait();
+
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+
+  float reward = 0;
+  CHECK_EQ(actions_.size(), 2);
+  // Agents are rewarded for both doing the same action
+  if (actions_[0] == actions_[1]) {
+    if (tid == 0) {
+      VLOG(1) << "Reward 1: Both agents selected action " << actions_[0];
+    }
+    reward += .1;
+  } else {
+    if (tid == 0) {
+      VLOG(1) << "Reward 0: Agents selected different actions "
+              << actions_[0] << ", " << actions_[1];
+    }
+  }
+  // Agents penalized for doing the same action more than once
+  if (actions_[tid] == old_actions_[tid]) {
+    VLOG(1) << "Reward -1. Agent" << tid << " twice selected action " << actions_[tid];
+    reward -= .1;
+  }
+  old_actions_[tid] = actions_[tid];
   return reward;
 }

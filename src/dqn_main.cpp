@@ -123,7 +123,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
         = std::make_shared<dqn::StateData>(dqn.state_size());
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     if (FLAGS_comm_actions > 0) {
-      const std::vector<float>& hear_state = dqn.GetHearFeatures(env);
+      const std::vector<float>& hear_state = dqn.GetHearFeatures(env, FLAGS_comm_actions);
       std::copy(hear_state.begin(), hear_state.end(),
                 current_state_sp->end() - FLAGS_comm_actions);
     }
@@ -137,9 +137,9 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
     VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
     Action action = dqn.GetAction(actor_output);
-    env.act(action.action, action.arg1, action.arg2);
+    task.act(tid, action.action, action.arg1, action.arg2);
     if (FLAGS_comm_actions > 0) {
-      env.say(dqn.GetSayMsg(actor_output));
+      task.say(tid, dqn.GetSayMsg(actor_output));
     }
     float reward = task.step(tid).second;
     steps++;

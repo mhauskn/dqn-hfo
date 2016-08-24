@@ -215,9 +215,10 @@ Action DQN::GetAction(const ActorOutput& actor_output) {
   return action;
 }
 
-std::vector<float> DQN::GetHearFeatures(HFOEnvironment& env) {
-  std::vector<float> vect;
+std::vector<float> DQN::GetHearFeatures(HFOEnvironment& env, int comm_acts) {
+  std::vector<float> vect(comm_acts, 0.);
   std::string msg = env.hear();
+  VLOG(1) << "Agent" << tid_ << " heard " << msg;
   std::stringstream ss(msg);
   float f;
   while (ss >> f) {
@@ -226,7 +227,6 @@ std::vector<float> DQN::GetHearFeatures(HFOEnvironment& env) {
       ss.ignore();
     }
   }
-  VLOG(1) << "Agent" << tid_ << " heard " << msg;
   return vect;
 }
 

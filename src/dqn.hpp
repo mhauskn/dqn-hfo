@@ -95,7 +95,7 @@ public:
   float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
 
   // Returns the features heard from other players say messages
-  std::vector<float> GetHearFeatures(hfo::HFOEnvironment& env);
+  std::vector<float> GetHearFeatures(hfo::HFOEnvironment& env, int comm_acts);
 
   // Returns the outgoing message to be said in-game
   std::string GetSayMsg(const ActorOutput& actor_output);

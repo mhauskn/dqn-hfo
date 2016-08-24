@@ -14,6 +14,12 @@ class Task {
   Task(std::string task_name, int offense_agents, int defense_agents);
   ~Task();
 
+  // Takes an action in the environment
+  virtual void act(int tid, hfo::action_t action, float arg1, float arg2);
+
+  // Say a message in the environment
+  virtual void say(int tid, const std::string& message);
+
   // Advances the environment. Returns new status and reward.
   std::pair<hfo::status_t, float> step(int tid);
 
@@ -112,7 +118,7 @@ class Soccer : public Task {
  * The original soccer task features a more informative reward signal
  * that rewards the agent for going to the ball, and kicking to goal.
  */
-class SoccerEasy : public Soccer {
+class SoccerEasy : public Task {
  public:
   SoccerEasy(int server_port, int offense_agents, int defense_agents);
   virtual float getMaxExpectedReward() { return 8; }
@@ -163,6 +169,10 @@ class Pass : public Task {
   std::vector<bool> got_kickable_reward_;
 };
 
+/**
+ * Cross task is a set play that requires the agent to pass to the
+ * teammate before scoring.
+ */
 class Cross : public Task {
  public:
   Cross(int server_port, int offense_agents, int defense_agents,
@@ -174,6 +184,26 @@ class Cross : public Task {
   virtual float getReward(int tid) override;
 
   std::vector<hfo::Player> initial_pob_;
+};
+
+/**
+ * The MirrorActions task rewards one agent for performing a task and
+ * the other for mirroring the actions of the first. Agents are
+ * penalized for repeating actions.
+ */
+class MirrorActions : public Task {
+ public:
+  MirrorActions(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 1; }
+  static std::string taskName() { return "mirror_actions"; }
+
+  virtual void act(int tid, hfo::action_t action, float arg1, float arg2) override;
+
+ protected:
+  virtual float getReward(int tid) override;
+
+  std::vector<hfo::action_t> actions_;
+  std::vector<hfo::action_t> old_actions_;
 };
 
 #endif
