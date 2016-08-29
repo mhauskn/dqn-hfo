@@ -62,11 +62,15 @@ DEFINE_string(tasks, "", "Tasks to use.");
 DEFINE_string(curriculum, "random", "Curriculum to use.");
 // Communication
 DEFINE_int32(comm_actions, 0, "Number of continuous actions used for communication.");
+DEFINE_bool(teammate_comm_gradients, false, "Teammate specifies gradients to comm actions");
 
 // Global Variables Shared Between Threads
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
 std::mutex MTX;
 std::vector<float> EVAL_PERF; // Used to compute an average evaluation performance
+boost::barrier* BAR; // Barrier pointer
+std::vector<int> INT_VEC;
+std::vector<float*> FLOAT_VEC;
 
 int NumStateFeatures(int num_players) {
   return 50 + 8 * (num_players);
@@ -123,7 +127,8 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
         = std::make_shared<dqn::StateData>(dqn.state_size());
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
     if (FLAGS_comm_actions > 0) {
-      const std::vector<float>& hear_state = dqn.GetHearFeatures(env, FLAGS_comm_actions);
+      const std::vector<float>& hear_state = dqn.GetHearFeatures(env);
+      CHECK_EQ(hear_state.size(), FLAGS_comm_actions);
       std::copy(hear_state.begin(), hear_state.end(),
                 current_state_sp->end() - FLAGS_comm_actions);
     }
@@ -135,7 +140,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn::InputStates input_states;
     std::copy(past_states.begin(), past_states.end(), input_states.begin());
     dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
-    VLOG(1) << "Actor_output: " << dqn::PrintActorOutput(actor_output);
+    VLOG(1) << "Actor_output: " << dqn.PrintActorOutput(actor_output);
     Action action = dqn.GetAction(actor_output);
     task.act(tid, action.action, action.arg1, action.arg2);
     if (FLAGS_comm_actions > 0) {
@@ -152,6 +157,12 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
       dqn::StateDataSp next_state_sp
           = std::make_shared<dqn::StateData>(dqn.state_size(), 0);
       std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
+      if (FLAGS_comm_actions > 0) {
+        const std::vector<float>& hear_state = dqn.GetHearFeatures(env);
+        CHECK_EQ(hear_state.size(), FLAGS_comm_actions);
+        std::copy(hear_state.begin(), hear_state.end(),
+                  next_state_sp->end() - FLAGS_comm_actions);
+      }
       const auto transition = task.episodeOver() ?
           dqn::Transition(input_states, actor_output, reward, 0, boost::none) :
           dqn::Transition(input_states, actor_output, reward, 0, next_state_sp);
@@ -257,10 +268,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
       << "Give a snapshot or weights but not both.";
   int num_features = NumStateFeatures(2) + FLAGS_comm_actions; // Enough for 2 agents and comm
   int num_discrete_actions = 3; // Dash, Turn, Kick
-  int num_continuous_actions = 5; // Parameters for the discrete actions
-  if (FLAGS_comm_actions > 0) {
-    num_continuous_actions += FLAGS_comm_actions; // Communication actions
-  }
+  int num_continuous_actions = dqn::kHFOParams + FLAGS_comm_actions;
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
@@ -390,7 +398,11 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     int n_updates = int(steps * FLAGS_update_ratio);
     if (FLAGS_share_replay_memory) { MTX.lock(); }
     for (int i=0; i<n_updates; ++i) {
-      dqn->Update();
+      if (FLAGS_teammate_comm_gradients) {
+        dqn->SynchronizedUpdate(*BAR, INT_VEC, FLOAT_VEC);
+      } else {
+        dqn->Update();
+      }
     }
     if (FLAGS_share_replay_memory) { MTX.unlock(); }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
@@ -449,6 +461,7 @@ int main(int argc, char** argv) {
   for (int i=0; i<12; ++i) { // Make the global pointers all null
     DQNS[i] = NULL;
   }
+  BAR = new boost::barrier(FLAGS_offense_agents + FLAGS_defense_agents);
   unsigned int seed = std::hash<std::string>()(save_path.native());
   srand(seed);
   Curriculum* tasks = Curriculum::getCurriculum(
@@ -470,4 +483,5 @@ int main(int argc, char** argv) {
     t.join();
   }
   delete tasks;
+  delete BAR;
 };

@@ -72,6 +72,8 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
     task = new Cross(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(MirrorActions::taskName()) == 0) {
     task = new MirrorActions(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(SayMyTid::taskName()) == 0) {
+    task = new SayMyTid(server_port, offense_agents, defense_agents);
   } else {
     LOG(FATAL) << "Task " << task_name << " is not a recognized task!";
   }

@@ -523,3 +523,38 @@ float MirrorActions::getReward(int tid) {
   old_actions_[tid] = actions_[tid];
   return reward;
 }
+
+SayMyTid::SayMyTid(int server_port, int offense_agents, int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents)
+{
+  CHECK_EQ(offense_agents, 2);
+  int max_steps = 100;
+  startServer(server_port, 2, 0, defense_agents, 0, true, max_steps);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
+
+float SayMyTid::getReward(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+  std::string msg = env.hear();
+  std::stringstream ss(msg);
+  float f = 0;
+  while (ss >> f) {
+    if (ss.peek() == ' ') {
+      ss.ignore();
+    }
+    break;
+  }
+  float reward = 0;
+  if (!msg.empty()) {
+    float target = tid == 0 ? -.8 : .8;
+    reward = .1 / exp(50. * pow(target - f, 2.f));
+    VLOG(1) << "Agent" << tid << " heard " << f << " reward " << reward;
+  }
+  barrier_.wait();
+  return reward;
+}

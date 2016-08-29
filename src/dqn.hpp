@@ -10,6 +10,7 @@
 #include <caffe/caffe.hpp>
 #include <boost/functional/hash.hpp>
 #include <boost/optional.hpp>
+#include <boost/thread/barrier.hpp>
 #include <mutex>
 
 struct Action {
@@ -22,6 +23,7 @@ namespace dqn {
 
 constexpr auto kStateInputCount = 1;
 constexpr auto kMinibatchSize = 32;
+constexpr auto kHFOParams = 5;
 
 using ActorOutput = std::vector<float>;
 using StateData   = std::vector<float>;
@@ -91,11 +93,14 @@ public:
   // Converts an ActorOutput into an action by maxing over discrete actions
   Action GetAction(const ActorOutput& actor_output);
 
+  std::string PrintActorOutput(const ActorOutput& actor_output);
+  std::string PrintActorOutput(const float* actions, const float* params);
+
   // Evaluate a state-action, returning the q-value.
   float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
 
   // Returns the features heard from other players say messages
-  std::vector<float> GetHearFeatures(hfo::HFOEnvironment& env, int comm_acts);
+  std::vector<float> GetHearFeatures(hfo::HFOEnvironment& env);
 
   // Returns the outgoing message to be said in-game
   std::string GetSayMsg(const ActorOutput& actor_output);
@@ -109,6 +114,10 @@ public:
 
   // Update the model(s)
   void Update();
+
+  void SynchronizedUpdate(boost::barrier& barrier,
+                          std::vector<int>& transitions,
+                          std::vector<float*>& gradients);
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_->clear(); }
@@ -146,7 +155,18 @@ protected:
   void Initialize();
 
   // Update both the actor and critic.
-  std::pair<float, float> UpdateActorCritic();
+  std::pair<float, float> UpdateActorCritic(const std::vector<int>& transitions);
+
+  // Synchronized update between two agents where communication
+  // gradients are exchanged
+  std::pair<float, float> SyncUpdateActorCritic(const std::vector<int>& transitions,
+                                                boost::barrier& barrier,
+                                                std::vector<float*>& gradients);
+  // Approximate (quick) version of the above update. Does not resepct
+  // the delay in communication.
+  std::pair<float, float> ApproxSyncUpdateActorCritic(const std::vector<int>& transitions,
+                                                      boost::barrier& barrier,
+                                                      std::vector<float*>& gradients);
 
   // Randomly sample the replay memory n-times, returning transition indexes
   std::vector<int> SampleTransitionsFromMemory(int n);
@@ -176,10 +196,19 @@ protected:
   std::vector<float> CriticForwardThroughActor(
       caffe::Net<float>& critic, caffe::Net<float>& actor,
       const std::vector<InputStates>& states_batch);
+  std::vector<float> CriticForwardThroughActor(
+      caffe::Net<float>& critic, caffe::Net<float>& actor,
+      const std::vector<InputStates>& states_batch,
+      float* teammate_comm_actions);
 
   // Runs forward on critic to produce q-values.
   std::vector<float> CriticForward(caffe::Net<float>& critic,
                                    const std::vector<InputStates>& states_batch,
+                                   const std::vector<ActorOutput>& action_batch);
+
+  std::vector<float> CriticForward(caffe::Net<float>& critic,
+                                   const std::vector<InputStates>& states_batch,
+                                   float* teammate_comm_actions,
                                    const std::vector<ActorOutput>& action_batch);
 
   // Input data into the State/Target/Filter layers of the given
@@ -255,8 +284,6 @@ void FindLatestSnapshot(const std::string& snapshot_prefix,
  * Look for the best HiScore matching the given snapshot prefix
  */
 int FindHiScore(const std::string& snapshot_prefix);
-
-std::string PrintActorOutput(const ActorOutput& actor_output);
 
 } // namespace dqn
 

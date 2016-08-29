@@ -206,4 +206,17 @@ class MirrorActions : public Task {
   std::vector<hfo::action_t> old_actions_;
 };
 
+/**
+ * SayMyTid rewards each agent when it says the tid of the teammate
+ */
+class SayMyTid : public Task {
+ public:
+  SayMyTid(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 10; }
+  static std::string taskName() { return "say_my_tid"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+};
+
 #endif

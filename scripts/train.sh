@@ -11,7 +11,20 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
+JOB="SayMyTid_CommAct1"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks say_my_tid -comm_actions 1`
+monitor $JOB $SAVE $PID
 
+JOB="SayMyTid_CommAct1_TeammateCommGrad"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks say_my_tid -comm_actions 1 -teammate_comm_gradients`
+monitor $JOB $SAVE $PID
+
+JOB="SayMyTid_CommAct1_ApproxTeammateCommGrad"
+SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks say_my_tid -comm_actions 1 -teammate_comm_gradients -approx_update`
+monitor $JOB $SAVE $PID
 
 # 8-23-16
 # JOB="MoveToBall_NoComm"
@@ -24,10 +37,10 @@ function monitor {
 # PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks move_to_ball -comm_actions 1`
 # monitor $JOB $SAVE $PID
 
-JOB="SoccerEasy_sanity"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 2000000 -offense_agents 1 -tasks soccer_easy`
-monitor $JOB $SAVE $PID
+# JOB="SoccerEasy_sanity"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 2000000 -offense_agents 1 -tasks soccer_easy`
+# monitor $JOB $SAVE $PID
 
 # JOB="MirrorActions_NoComm"
 # SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
@@ -37,6 +50,11 @@ monitor $JOB $SAVE $PID
 # JOB="MirrorActions_CommAct1"
 # SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
 # PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions -comm_actions 1`
+# monitor $JOB $SAVE $PID
+
+# JOB="MirrorActions_CommAct1_TeammateCommGrad"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions -comm_actions 1 -teammate_comm_gradients`
 # monitor $JOB $SAVE $PID
 
 # JOB="MirrorActions_ShareLayers2_NoComm"
