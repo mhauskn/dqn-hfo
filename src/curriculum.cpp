@@ -50,6 +50,8 @@ Task& Curriculum::getTask(int tid) {
 }
 
 void Curriculum::addTask(Task* task) {
+  int task_id = all_tasks_.size();
+  task->setID(task_id);
   all_tasks_.push_back(task);
 }
 
@@ -58,6 +60,8 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
   Task* task = NULL;
   if (task_name.compare(MoveToBall::taskName()) == 0) {
     task = new MoveToBall(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(MoveAwayFromBall::taskName()) == 0) {
+    task = new MoveAwayFromBall(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(KickToGoal::taskName()) == 0) {
     task = new KickToGoal(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Soccer::taskName()) == 0) {
@@ -77,6 +81,8 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
   } else {
     LOG(FATAL) << "Task " << task_name << " is not a recognized task!";
   }
+  int task_id = all_tasks_.size();
+  task->setID(task_id);
   all_tasks_.push_back(task);
   return *task;
 }

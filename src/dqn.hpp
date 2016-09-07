@@ -29,8 +29,12 @@ using ActorOutput = std::vector<float>;
 using StateData   = std::vector<float>;
 using StateDataSp = std::shared_ptr<StateData>;
 using InputStates = std::array<StateDataSp, kStateInputCount>;
-using Transition  = std::tuple<InputStates, ActorOutput, float,
-                               float, boost::optional<StateDataSp>>;
+using Transition  = std::tuple<InputStates,                   // 0 State
+                               int,                           // 1 Task Identifier
+                               ActorOutput,                   // 2 Action
+                               float,                         // 3 Reward
+                               float,                         // 4 OnPolicy Target
+                               boost::optional<StateDataSp>>; // 5 Next-State
 using SolverSp    = std::shared_ptr<caffe::Solver<float>>;
 using NetSp       = boost::shared_ptr<caffe::Net<float>>;
 
@@ -38,11 +42,13 @@ using NetSp       = boost::shared_ptr<caffe::Net<float>>;
 constexpr auto state_input_layer_name         = "state_input_layer";
 constexpr auto action_input_layer_name        = "action_input_layer";
 constexpr auto action_params_input_layer_name = "action_params_input_layer";
+constexpr auto task_input_layer_name          = "task_input_layer";
 constexpr auto target_input_layer_name        = "target_input_layer";
 constexpr auto filter_input_layer_name        = "filter_input_layer";
 constexpr auto q_values_layer_name            = "q_values_layer";
 // Blob names
 constexpr auto states_blob_name        = "states";
+constexpr auto task_blob_name          = "task";
 constexpr auto actions_blob_name       = "actions";
 constexpr auto action_params_blob_name = "action_params";
 constexpr auto targets_blob_name       = "target";
@@ -81,10 +87,13 @@ public:
   ActorOutput GetRandomActorOutput();
 
   // Select an action using epsilon-greedy action selection.
-  ActorOutput SelectAction(const InputStates& input_states, double epsilon);
+  ActorOutput SelectAction(const InputStates& input_states,
+                           const float& task_id,
+                           const double& epsilon);
 
   // Select a batch of actions using epsilon-greedy action selection.
   std::vector<ActorOutput> SelectActions(const std::vector<InputStates>& states_batch,
+                                         const std::vector<float>& task_batch,
                                          double epsilon);
 
   // Converts an ActorOutput into an action by samping over discrete actions
@@ -97,7 +106,9 @@ public:
   std::string PrintActorOutput(const float* actions, const float* params);
 
   // Evaluate a state-action, returning the q-value.
-  float EvaluateAction(const InputStates& input_states, const ActorOutput& action);
+  float EvaluateAction(const InputStates& input_states,
+                       const float& task_id,
+                       const ActorOutput& action);
 
   // Returns the features heard from other players say messages
   std::vector<float> GetHearFeatures(hfo::HFOEnvironment& env);
@@ -181,12 +192,14 @@ protected:
 
   // Given input states, use the actor network to select an action.
   ActorOutput SelectActionGreedily(caffe::Net<float>& actor,
-                                   const InputStates& last_states);
+                                   const InputStates& last_states,
+                                   const float& task_id);
 
   // Given a batch of input states, return a batch of selected actions.
   std::vector<ActorOutput> SelectActionGreedily(
       caffe::Net<float>& actor,
-      const std::vector<InputStates>& states_batch);
+      const std::vector<InputStates>& states_batch,
+      const std::vector<float>& task_batch);
 
   std::vector<ActorOutput> getActorOutput(caffe::Net<float>& actor,
                                           int batch_size,
@@ -195,19 +208,23 @@ protected:
   // Runs forward on critic to produce q-values. Actions inferred by actor.
   std::vector<float> CriticForwardThroughActor(
       caffe::Net<float>& critic, caffe::Net<float>& actor,
-      const std::vector<InputStates>& states_batch);
+      const std::vector<InputStates>& states_batch,
+      const std::vector<float>& task_batch);
   std::vector<float> CriticForwardThroughActor(
       caffe::Net<float>& critic, caffe::Net<float>& actor,
       const std::vector<InputStates>& states_batch,
+      const std::vector<float>& task_batch,
       float* teammate_comm_actions);
 
   // Runs forward on critic to produce q-values.
   std::vector<float> CriticForward(caffe::Net<float>& critic,
                                    const std::vector<InputStates>& states_batch,
+                                   const std::vector<float>& task_batch,
                                    const std::vector<ActorOutput>& action_batch);
 
   std::vector<float> CriticForward(caffe::Net<float>& critic,
                                    const std::vector<InputStates>& states_batch,
+                                   const std::vector<float>& task_batch,
                                    float* teammate_comm_actions,
                                    const std::vector<ActorOutput>& action_batch);
 
@@ -215,6 +232,7 @@ protected:
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
                            float* states_input,
+                           float* task_input,
                            float* actions_input,
                            float* action_params_input,
                            float* target_input,
@@ -252,9 +270,9 @@ protected:
 };
 
 caffe::NetParameter CreateActorNet(
-    int state_size, int num_discrete_actions, int num_continuous_actions);
+    int state_size, int num_discrete_actions, int num_continuous_actions, int num_tasks);
 caffe::NetParameter CreateCriticNet(
-    int state_size, int num_discrete_actions, int num_continuous_actions);
+    int state_size, int num_discrete_actions, int num_continuous_actions, int num_tasks);
 /**
  * Returns a vector of filenames matching a given regular expression.
  */
@@ -284,6 +302,24 @@ void FindLatestSnapshot(const std::string& snapshot_prefix,
  * Look for the best HiScore matching the given snapshot prefix
  */
 int FindHiScore(const std::string& snapshot_prefix);
+
+template<typename Dtype>
+std::string PrintVector(const std::vector<Dtype>& v) {
+  std::string s;
+  for (int i=0; i<v.size(); ++i) {
+    s.append(std::to_string(v[i]) + " ");
+  }
+  return s;
+}
+
+template<typename Dtype>
+std::string PrintVector(Dtype* v, int num) {
+  std::string s;
+  for (int i=0; i<num; ++i) {
+    s.append(std::to_string(v[i]) + " ");
+  }
+  return s;
+}
 
 } // namespace dqn
 

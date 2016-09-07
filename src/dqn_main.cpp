@@ -114,6 +114,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
                                                 const int tid,
                                                 Task& task) {
   std::vector<dqn::Transition> episode;
+  int task_id = task.getID();
   HFOEnvironment& env = task.getEnv(tid);
   env.act(NOOP);
   task.step(tid);
@@ -139,7 +140,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     }
     dqn::InputStates input_states;
     std::copy(past_states.begin(), past_states.end(), input_states.begin());
-    dqn::ActorOutput actor_output = dqn.SelectAction(input_states, epsilon);
+    dqn::ActorOutput actor_output = dqn.SelectAction(input_states, task_id, epsilon);
     VLOG(1) << "Actor_output: " << dqn.PrintActorOutput(actor_output);
     Action action = dqn.GetAction(actor_output);
     task.act(tid, action.action, action.arg1, action.arg2);
@@ -148,7 +149,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     }
     float reward = task.step(tid).second;
     steps++;
-    VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, actor_output)
+    VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, task_id, actor_output)
             << " Action: " << hfo::ActionToString(action.action)
             << " Reward: " << reward;
     if (update) {
@@ -164,8 +165,8 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
                   next_state_sp->end() - FLAGS_comm_actions);
       }
       const auto transition = task.episodeOver() ?
-          dqn::Transition(input_states, actor_output, reward, 0, boost::none) :
-          dqn::Transition(input_states, actor_output, reward, 0, next_state_sp);
+          dqn::Transition(input_states, task_id, actor_output, reward, 0, boost::none) :
+          dqn::Transition(input_states, task_id, actor_output, reward, 0, next_state_sp);
       episode.push_back(transition);
     }
   }
@@ -269,6 +270,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   int num_features = NumStateFeatures(2) + FLAGS_comm_actions; // Enough for 2 agents and comm
   int num_discrete_actions = 3; // Dash, Turn, Kick
   int num_continuous_actions = dqn::kHFOParams + FLAGS_comm_actions;
+  int num_tasks = tasks.getTasks().size();
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
   caffe::SolverParameter critic_solver_param;
@@ -278,7 +280,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     caffe::ReadProtoFromTextFileOrDie(actor_net_filename.c_str(), actor_net_param);
   } else {
     actor_net_param->CopyFrom(dqn::CreateActorNet(
-        num_features, num_discrete_actions, num_continuous_actions));
+        num_features, num_discrete_actions, num_continuous_actions, num_tasks));
     WriteProtoToTextFile(*actor_net_param, actor_net_filename.c_str());
   }
   caffe::NetParameter* critic_net_param = critic_solver_param.mutable_net_param();
@@ -287,7 +289,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     caffe::ReadProtoFromTextFileOrDie(critic_net_filename.c_str(), critic_net_param);
   } else {
     critic_net_param->CopyFrom(dqn::CreateCriticNet(
-        num_features, num_discrete_actions, num_continuous_actions));
+        num_features, num_discrete_actions, num_continuous_actions, num_tasks));
     WriteProtoToTextFile(*critic_net_param, critic_net_filename.c_str());
   }
   actor_solver_param.set_snapshot_prefix((save_prefix + "_actor").c_str());

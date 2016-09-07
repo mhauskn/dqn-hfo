@@ -26,6 +26,8 @@ class Task {
   // Returns how much reward an agent can expect to accrue if performing well.
   virtual float getMaxExpectedReward() = 0;
 
+  int getID() { return id_; }
+  void setID(int new_id) { id_ = new_id; }
   bool episodeOver() const { return episode_over_; }
   hfo::HFOEnvironment& getEnv(int tid);
   hfo::status_t getStatus(int tid) const;
@@ -49,6 +51,7 @@ class Task {
 
  protected:
   std::string task_name_;
+  int id_;
   std::vector<std::thread> threads_;
   std::vector<hfo::HFOEnvironment> envs_;
   std::vector<hfo::status_t> status_;
@@ -81,6 +84,19 @@ class MoveToBall : public Task {
   std::vector<bool> first_step_;
 };
 
+class MoveAwayFromBall : public Task {
+ public:
+  MoveAwayFromBall(int server_port, int offense_agents, int defense_agents,
+                   float ball_x_min=0.0, float ball_x_max=0.8);
+  virtual float getMaxExpectedReward() { return 0.65; }
+  static std::string taskName() { return "move_away_from_ball"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+
+  std::vector<float> old_ball_prox_;
+  std::vector<bool> first_step_;
+};
 /**
  * KickToGoal task initializes the agent with the ball and rewards the
  * agent for kicking the ball towards the goal.
@@ -194,7 +210,7 @@ class Cross : public Task {
 class MirrorActions : public Task {
  public:
   MirrorActions(int server_port, int offense_agents, int defense_agents);
-  virtual float getMaxExpectedReward() { return 1; }
+  virtual float getMaxExpectedReward() { return 30; }
   static std::string taskName() { return "mirror_actions"; }
 
   virtual void act(int tid, hfo::action_t action, float arg1, float arg2) override;

@@ -142,7 +142,7 @@ void Task::startServer(int port, int offense_agents, int offense_npcs,
   if (FLAGS_verbose)   { cmd += " --verbose"; }
   LOG(INFO) << "Starting server with command: " << cmd;
   threads_.emplace_back(std::thread(ExecuteCommand, cmd));
-  sleep(5);
+  sleep(10);
 }
 
 void Task::stepThread(int tid) {
