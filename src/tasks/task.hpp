@@ -38,6 +38,7 @@ class Task {
 
  protected:
   virtual float getReward(int tid) = 0;
+  virtual float getNormReward(int tid) { return getReward(tid) / getMaxExpectedReward(); }
   void stepThread(int tid);
   hfo::status_t stepUntilEpisodeEnd(int tid);
   void startServer(int port, int offense_agents, int offense_npcs,
@@ -73,7 +74,7 @@ class MoveToBall : public Task {
  public:
   MoveToBall(int server_port, int offense_agents, int defense_agents,
              float ball_x_min=0.0, float ball_x_max=0.8);
-  virtual float getMaxExpectedReward() { return 0.65; }
+  virtual float getMaxExpectedReward() { return 0.6; }
   static std::string taskName() { return "move_to_ball"; }
 
  protected:
@@ -88,7 +89,7 @@ class MoveAwayFromBall : public Task {
  public:
   MoveAwayFromBall(int server_port, int offense_agents, int defense_agents,
                    float ball_x_min=0.0, float ball_x_max=0.8);
-  virtual float getMaxExpectedReward() { return 0.65; }
+  virtual float getMaxExpectedReward() { return 0.7; }
   static std::string taskName() { return "move_away_from_ball"; }
 
  protected:
@@ -105,14 +106,13 @@ class KickToGoal : public Task {
  public:
   KickToGoal(int server_port, int offense_agents, int defense_agents,
              float ball_x_min=0.4, float ball_x_max=0.8);
-  virtual float getMaxExpectedReward() { return 0.8; }
+  virtual float getMaxExpectedReward() { return 0.4; }
   static std::string taskName() { return "kick_to_goal"; }
 
  protected:
   virtual float getReward(int tid) override;
 
   std::vector<float> old_ball_dist_goal_;
-  std::vector<float> ball_dist_goal_delta_;
   std::vector<bool> first_step_;
 };
 
@@ -129,6 +129,25 @@ class Soccer : public Task {
  protected:
   virtual float getReward(int tid) override;
 };
+class Soccer1v1 : public Task {
+ public:
+  Soccer1v1(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 1; }
+  static std::string taskName() { return "soccer1v1"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+};
+class Soccer2v1 : public Task {
+ public:
+  Soccer2v1(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 1; }
+  static std::string taskName() { return "soccer2v1"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+  std::vector<hfo::Player> old_pob_;
+};
 
 /**
  * The original soccer task features a more informative reward signal
@@ -137,7 +156,7 @@ class Soccer : public Task {
 class SoccerEasy : public Task {
  public:
   SoccerEasy(int server_port, int offense_agents, int defense_agents);
-  virtual float getMaxExpectedReward() { return 8; }
+  virtual float getMaxExpectedReward() { return 9; }
   static std::string taskName() { return "soccer_easy"; }
 
  protected:
@@ -148,6 +167,7 @@ class SoccerEasy : public Task {
   std::vector<bool> old_kickable_;
   std::vector<float> old_ball_dist_goal_;
   std::vector<bool> got_kickable_reward_;
+  std::vector<hfo::Player> old_pob_;
 };
 
 /**
@@ -183,6 +203,25 @@ class Pass : public Task {
   std::vector<float> old_teammate_prox_;
   std::vector<float> old_ball_dist_teammate_;
   std::vector<bool> got_kickable_reward_;
+};
+
+
+/**
+ * Passing requires the agent to kick
+ */
+class KickToTeammate : public Task {
+ public:
+  KickToTeammate(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 1; }
+  static std::string taskName() { return "kick_to_teammate"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+
+  std::vector<hfo::Player> kicker_;
+  std::vector<float> old_ball_prox_;
+  std::vector<float> old_teammate_prox_;
+  std::vector<float> old_ball_dist_teammate_;
 };
 
 /**
@@ -230,6 +269,16 @@ class SayMyTid : public Task {
   SayMyTid(int server_port, int offense_agents, int defense_agents);
   virtual float getMaxExpectedReward() { return 10; }
   static std::string taskName() { return "say_my_tid"; }
+
+ protected:
+  virtual float getReward(int tid) override;
+};
+
+class Keepaway : public Task {
+ public:
+  Keepaway(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 1; }
+  static std::string taskName() { return "keepaway"; }
 
  protected:
   virtual float getReward(int tid) override;

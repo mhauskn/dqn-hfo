@@ -115,10 +115,11 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
                                                 Task& task) {
   std::vector<dqn::Transition> episode;
   int task_id = task.getID();
+  VLOG(1) << "Task " << task.getName() << " ID " << task_id;
   HFOEnvironment& env = task.getEnv(tid);
   env.act(NOOP);
   task.step(tid);
-  CHECK(!task.episodeOver());
+  CHECK(!task.episodeOver()) << "Task " << task.getName() << " episode over!";
   std::deque<dqn::StateDataSp> past_states;
   int steps = 0;
   while (!task.episodeOver()) {
@@ -241,7 +242,7 @@ double Evaluate(dqn::DQN& dqn, int tid, Curriculum& tasks) {
   std::vector<double> task_perf;
   for (Task* t : tasks.getTasks()) {
     float perf = Evaluate(dqn, tid, *t);
-    tasks.addEvalPerf(*t, perf);
+    tasks.addEvalPerf(*t, perf, tid);
     task_perf.push_back(perf);
   }
   return get_avg_std(task_perf).first;
@@ -267,7 +268,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
-  int num_features = NumStateFeatures(2) + FLAGS_comm_actions; // Enough for 2 agents and comm
+  int num_features = NumStateFeatures(3) + FLAGS_comm_actions; // Enough for 2 agents and comm
   int num_discrete_actions = 3; // Dash, Turn, Kick
   int num_continuous_actions = dqn::kHFOParams + FLAGS_comm_actions;
   int num_tasks = tasks.getTasks().size();
@@ -395,7 +396,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
               << ", reward = " << std::get<0>(result)
               << ", steps = " << std::get<1>(result)
               << ", status = " << hfo::StatusToString(std::get<2>(result))
-              << ", task = " << task.getName();
+              << ", task = " << task.getName()
+              << ", id = " << task.getID();
     int steps = std::get<1>(result);
     int n_updates = int(steps * FLAGS_update_ratio);
     if (FLAGS_share_replay_memory) { MTX.lock(); }

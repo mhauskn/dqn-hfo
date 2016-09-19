@@ -32,7 +32,7 @@ class Curriculum {
   inline std::vector<Task*>& getTasks() { return all_tasks_; }
 
   // Add the latest performance of the agent when evaluated on a task
-  virtual void addEvalPerf(const Task& task, float perf) {};
+  virtual void addEvalPerf(const Task& task, float perf, int tid) {};
 
  protected:
   virtual void queueTasks() = 0;
@@ -64,12 +64,12 @@ class SequentialCurriculum : public Curriculum {
   SequentialCurriculum(int num_agents);
 
   // Add the latest performance of the agent when evaluated on a task
-  virtual void addEvalPerf(const Task& task, float perf);
+  virtual void addEvalPerf(const Task& task, float perf, int tid);
 
  protected:
   virtual void queueTasks();
   int curr_task_indx_;
-  std::vector<float> task_eval_perf_;
+  std::vector<std::vector<float> > task_eval_perf_;
 };
 
 #endif

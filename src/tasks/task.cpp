@@ -27,6 +27,12 @@ float Task::getDist(float o1_dist, float o1_ang_sin, float o1_ang_cos,
   float alpha = std::max(o1_ang_rad, o2_ang_rad) - std::min(o1_ang_rad, o2_ang_rad);
   float o1_dist_o2 = sqrt(o1_dist * o1_dist + o2_dist * o2_dist
                           - 2. * o1_dist * o2_dist * cos(alpha));
+  if (!std::isfinite(o1_dist_o2)) {
+    LOG(ERROR) << "ERROR: getDist not finite! o1_dist " << o1_dist << " o2_dist " << o2_dist
+               << " alpha " << alpha << " o1_ang_rad " << o1_ang_rad
+               << " o2_ang_rad " << o2_ang_rad;
+    return 0;
+  }
   return o1_dist_o2;
 }
 
@@ -91,6 +97,7 @@ pair<status_t, float> Task::step(int tid) {
     episode_over_ = true;
   }
   float reward = getReward(tid);
+  CHECK(std::isfinite(reward)) << "Reward not finite! Task=" << getName();
   episode_reward_[tid] += reward;
   if (episode_over_) {
     for (int i=0; i<envs_.size(); ++i) {
@@ -211,13 +218,69 @@ float Soccer::getReward(int tid) {
   return 0;
 }
 
+Soccer1v1::Soccer1v1(int server_port, int offense_agents, int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents)
+{
+  int max_steps = 500;
+  CHECK_EQ(offense_agents, 1);
+  CHECK_EQ(defense_agents, 0);
+  int defense_npcs = 1;
+  startServer(server_port, offense_agents, 0, defense_agents, defense_npcs, true,
+              max_steps);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
+
+float Soccer1v1::getReward(int tid) {
+  if (status_[tid] == GOAL) {
+    return 1;
+  }
+  return 0;
+}
+
+Soccer2v1::Soccer2v1(int server_port, int offense_agents, int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents),
+    old_pob_(offense_agents + defense_agents)
+{
+  int max_steps = 500;
+  CHECK_EQ(offense_agents, 2);
+  CHECK_EQ(defense_agents, 0);
+  int defense_npcs = 1;
+  startServer(server_port, offense_agents, 0, defense_agents, defense_npcs, true,
+              max_steps);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
+
+float Soccer2v1::getReward(int tid) {
+  HFOEnvironment& env = envs_[tid];
+  Player pob = env.playerOnBall();
+  float reward = 0;
+  if (status_[tid] == GOAL) {
+    if (old_pob_[tid].unum == env.getUnum()) {
+      reward = 1.;
+    } else {
+      reward = .5;
+    }
+  }
+  old_pob_[tid] = pob;
+  return reward;
+}
+
 SoccerEasy::SoccerEasy(int server_port, int offense_agents, int defense_agents) :
     Task(taskName(), offense_agents, defense_agents),
     first_step_(offense_agents + defense_agents, true),
     old_ball_prox_(offense_agents + defense_agents, 0.),
     old_kickable_(offense_agents + defense_agents, false),
     old_ball_dist_goal_(offense_agents + defense_agents, 0.),
-    got_kickable_reward_(offense_agents + defense_agents, false)
+    got_kickable_reward_(offense_agents + defense_agents, false),
+    old_pob_(offense_agents + defense_agents)
 {
   int max_steps = 500;
   startServer(server_port, offense_agents, 0, defense_agents, 0, true,
@@ -254,37 +317,39 @@ float SoccerEasy::getReward(int tid) {
   }
 
   float reward = 0;
-
-  // Move to ball reward
-  if (pob.unum < 0 || pob.unum == env.getUnum()) {
-    VLOG(1) << "MoveToBallReward: " << ball_prox_delta;
-    reward += ball_prox_delta;
-  }
-  // Kickable reward
-  if (kickable && !old_kickable_[tid] && !got_kickable_reward_[tid]) {
-    VLOG(1) << "KickableReward: 1";
-    reward += 1.0;
-    got_kickable_reward_[tid] = true;
-  }
-  // Kick to goal reward
-  if (pob.unum == env.getUnum()) {
-    VLOG(1) << "KickToGoalReward: " << (3. * -ball_dist_goal_delta);
-    reward -= 3. * ball_dist_goal_delta;
+  if (!episodeOver()) {
+    // Move to ball reward
+    if (pob.unum < 0 || pob.unum == env.getUnum()) {
+      VLOG(1) << "Unum-" << env.getUnum() << " MoveToBallReward: " << ball_prox_delta;
+      reward += ball_prox_delta;
+    }
+    // Kickable reward
+    if (kickable && !old_kickable_[tid] && !got_kickable_reward_[tid]) {
+      VLOG(1) << "Unum-" << env.getUnum() << " KickableReward: 1";
+      reward += 1.0;
+      got_kickable_reward_[tid] = true;
+    }
+    // Kick to goal reward
+    if (pob.unum == env.getUnum()) {
+      VLOG(1) << "Unum-" << env.getUnum() << " KickToGoalReward: " << (3. * -ball_dist_goal_delta);
+      reward -= 3. * ball_dist_goal_delta;
+    }
   }
   // Goal Reward
   if (status_[tid] == GOAL) {
-    if (pob.unum == env.getUnum()) {
-      VLOG(1) << "GoalReward: 5";
-      reward += 5.;
+    if (old_pob_[tid].unum == env.getUnum()) {
+      VLOG(1) << "Unum-" << env.getUnum() << " GoalReward: 5";
+      reward = 5.;
     } else {
-      VLOG(1) << "TeammateGoalReward: 1";
-      reward += 1.;
+      VLOG(1) << "Unum-" << env.getUnum() << " TeammateGoalReward: 1";
+      reward = 1.;
     }
   }
 
   old_ball_prox_[tid] = ball_proximity;
   old_kickable_[tid] = kickable;
   old_ball_dist_goal_[tid] = ball_dist_goal;
+  old_pob_[tid] = pob;
 
   if (episodeOver()) {
     first_step_[tid] = true;
@@ -352,8 +417,7 @@ Pass::Pass(int server_port, int offense_agents, int defense_agents) :
   }
   // Start a passing teammate
   if (offense_agents == 1) {
-    string cmd = "./bin/passer " + std::to_string(server_port) + " base_left false &";
-    ExecuteCommand(cmd);
+    string cmd = "./bin/passer " + std::to_string(server_port) + " base_left false";
     threads_.emplace_back(ExecuteCommand, cmd);
   }
 }
@@ -430,6 +494,91 @@ float Pass::getReward(int tid) {
   barrier_.wait();
   return reward;
 }
+
+KickToTeammate::KickToTeammate(int server_port, int offense_agents, int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents),
+    kicker_(offense_agents + defense_agents),
+    old_ball_prox_(offense_agents + defense_agents, 0.),
+    old_teammate_prox_(offense_agents + defense_agents, 0.),
+    old_ball_dist_teammate_(offense_agents + defense_agents, 0.)
+{
+  CHECK_LE(offense_agents, 2);
+  int max_steps = 50;
+  int offense_on_ball = 100; // Randomize who gets the ball
+  if (offense_agents == 1) {
+    offense_on_ball = 1;
+  }
+  startServer(server_port, 2, 0, defense_agents, 0, true,
+              max_steps, 0.5, 0.5, offense_on_ball);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+    kicker_[i].unum = -1;
+  }
+  if (offense_agents == 1) {
+    // Start a dummy teammate
+    string cmd = "./bin/dummy_teammate " + std::to_string(server_port) + " base_left false";
+    threads_.emplace_back(ExecuteCommand, cmd);
+    sleep(10);
+  }
+}
+
+float KickToTeammate::getReward(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+  Player pob = env.playerOnBall();
+  const std::vector<float>& current_state = env.getState();
+  CHECK_GT(current_state.size(), 64) << "Unexpected number of features.";
+  float ball_proximity = current_state[53];
+  float ball_dist = 1. - (ball_proximity+1.)/2.;
+  float teammate_proximity = current_state[60];
+  float teammate_dist = 1. - (teammate_proximity+1.)/2.;
+  float ball_dist_teammate = getDist(
+      ball_dist, current_state[51], current_state[52],
+      teammate_dist, current_state[58], current_state[59]);
+  float ball_dist_teammate_delta = ball_dist_teammate - old_ball_dist_teammate_[tid];
+  float ball_prox_delta = ball_proximity - old_ball_prox_[tid];
+  float teammate_prox_delta = teammate_proximity - old_teammate_prox_[tid];
+
+  if (pob.unum > 0 && kicker_[tid].unum < 0) {
+    kicker_[tid] = pob;
+    VLOG(1) << "Unum-" << tid << " BackupKicker " << pob.unum;
+    ball_dist_teammate_delta = 0;
+    ball_prox_delta = 0;
+    teammate_prox_delta = 0;
+  }
+  float reward = 0;
+
+  if (kicker_[tid].unum == env.getUnum()) {
+    // Positive reward for minimizing distance between ball and teammate
+    float kick_to_teammate_reward = std::max(0.f, -ball_dist_teammate_delta);
+    reward += kick_to_teammate_reward;
+    VLOG(1) << "Unum" << env.getUnum() << " KickToTeammate " << kick_to_teammate_reward;
+  } else { // We are recieving the kick
+    // Positive Reward for getting closer to the ball
+    float approach_ball_reward = std::max(0.f, ball_prox_delta);
+    reward += approach_ball_reward;
+    VLOG(1) << "Unum" << env.getUnum() << " ApproachBall " << approach_ball_reward;
+  }
+  // Negative reward for moving towards the teammate
+  float avoid_teammate_reward = std::min(0.f, -teammate_prox_delta);
+  reward += avoid_teammate_reward;
+  VLOG(1) << "Unum" << env.getUnum() << " AvoidTeammate " << avoid_teammate_reward;
+
+  old_ball_prox_[tid] = ball_proximity;
+  old_teammate_prox_[tid] = teammate_proximity;
+  old_ball_dist_teammate_[tid] = ball_dist_teammate;
+
+  if (episodeOver()) {
+    reward = 0.;
+    VLOG(1) << "Unum-" << tid << " Kicker is " << pob.unum;
+    kicker_[tid] = pob;
+  }
+  barrier_.wait();
+  return reward;
+}
+
 
 Cross::Cross(int server_port, int offense_agents, int defense_agents,
              float ball_x_min, float ball_x_max) :
@@ -554,6 +703,36 @@ float SayMyTid::getReward(int tid) {
     float target = tid == 0 ? -.8 : .8;
     reward = .1 / exp(50. * pow(target - f, 2.f));
     VLOG(1) << "Agent" << tid << " heard " << f << " reward " << reward;
+  }
+  barrier_.wait();
+  return reward;
+}
+
+Keepaway::Keepaway(int server_port, int offense_agents, int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents)
+{
+  CHECK_EQ(offense_agents, 2);
+  int max_steps = 500;
+  int defenders = 1;
+  startServer(server_port, 2, 0, defenders, 0, true, max_steps);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+  // Start a chaser
+  string cmd = "./bin/chaser " + std::to_string(server_port) + " base_right true &";
+  threads_.emplace_back(ExecuteCommand, cmd);
+  sleep(5);
+}
+
+float Keepaway::getReward(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+  float reward = .01;
+  status_t s = status_[tid];
+  if (status_[tid] == OUT_OF_BOUNDS || status_[tid] == CAPTURED_BY_DEFENSE) {
+    reward = -1.;
   }
   barrier_.wait();
   return reward;

@@ -66,18 +66,26 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
     task = new KickToGoal(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Soccer::taskName()) == 0) {
     task = new Soccer(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(Soccer1v1::taskName()) == 0) {
+    task = new Soccer1v1(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(Soccer2v1::taskName()) == 0) {
+    task = new Soccer2v1(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(SoccerEasy::taskName()) == 0) {
     task = new SoccerEasy(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Dribble::taskName()) == 0) {
     task = new Dribble(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Pass::taskName()) == 0) {
     task = new Pass(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(KickToTeammate::taskName()) == 0) {
+    task = new KickToTeammate(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Cross::taskName()) == 0) {
     task = new Cross(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(MirrorActions::taskName()) == 0) {
     task = new MirrorActions(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(SayMyTid::taskName()) == 0) {
     task = new SayMyTid(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(Keepaway::taskName()) == 0) {
+    task = new Keepaway(server_port, offense_agents, defense_agents);
   } else {
     LOG(FATAL) << "Task " << task_name << " is not a recognized task!";
   }
@@ -113,29 +121,38 @@ void RandomCurriculum::queueTasks() {
 
 SequentialCurriculum::SequentialCurriculum(int num_agents) :
     Curriculum(num_agents),
-    curr_task_indx_(0)
+    curr_task_indx_(0),
+    task_eval_perf_(num_agents)
 {
 }
 
 void SequentialCurriculum::queueTasks() {
-  Task* curr_task = all_tasks_[curr_task_indx_];
-  task_eval_perf_.resize(all_tasks_.size(), 0.);
-  float curr_task_perf = task_eval_perf_[curr_task_indx_];
-  if (curr_task_perf >= FLAGS_performance_threshold) {
-    curr_task_indx_ = min(int(all_tasks_.size() - 1), curr_task_indx_ + 1);
-    LOG(INFO) << "SequentialCurriculum: Graduated from task " << curr_task->getName()
-              << " with avg_performance " << curr_task_perf;
+  curr_task_indx_ = all_tasks_.size()-1;
+  for (int t = 0; t < all_tasks_.size(); ++t) {
+    float avg_perf = 0.;
+    for (int a = 0; a < task_eval_perf_.size(); ++a) {
+      if (task_eval_perf_[a].size() < all_tasks_.size()) {
+        task_eval_perf_[a].resize(all_tasks_.size(), 0.);
+      }
+      avg_perf += task_eval_perf_[a][t];
+    }
+    avg_perf /= float(task_eval_perf_.size());
+    if (avg_perf < FLAGS_performance_threshold) {
+      curr_task_indx_ = t;
+      break;
+    }
   }
   for (int i=0; i<current_tasks_.size(); ++i) {
     current_tasks_[i] = all_tasks_[curr_task_indx_];
   }
 }
 
-void SequentialCurriculum::addEvalPerf(const Task& task, float perf) {
-  task_eval_perf_.resize(all_tasks_.size(), 0.);
+void SequentialCurriculum::addEvalPerf(const Task& task, float perf, int tid) {
+  CHECK_LE(tid, task_eval_perf_.size());
+  CHECK_EQ(task_eval_perf_[tid].size(), all_tasks_.size());
   for (int i=0; i<all_tasks_.size(); ++i) {
     if (&task == all_tasks_[i]) {
-      task_eval_perf_[i] = perf;
+      task_eval_perf_[tid][i] = perf;
     }
   }
 }

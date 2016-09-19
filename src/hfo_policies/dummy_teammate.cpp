@@ -14,10 +14,14 @@ string team_name = "base_left";
 bool goalie = false;
 
 int main(int argc, char** argv) {
-  if (argc > 1) {
-    port = atoi(argv[1]);
+  if (argc < 4) {
+    cout << "Usage: " << argv[0] << " port team_name goalie" << endl;
+    exit(0);
   }
-
+  port = atoi(argv[1]);
+  team_name = argv[2];
+  goalie = atoi(argv[3]);
+  cout << port << " " << team_name << " " << goalie << endl;
   HFOEnvironment hfo;
   hfo.connectToServer(features, config_dir, port, server_addr,
                       team_name, goalie);

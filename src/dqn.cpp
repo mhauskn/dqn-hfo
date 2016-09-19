@@ -224,6 +224,7 @@ std::vector<float> DQN::GetHearFeatures(HFOEnvironment& env) {
   int num_comm_actions = kActionParamSize - kHFOParams;
   std::vector<float> vect(num_comm_actions, 0.);
   std::string msg = env.hear();
+  VLOG(1) << "Agent" << tid_ << " heard " << msg;
   std::stringstream ss(msg);
   float f;
   int i=0;
@@ -551,11 +552,14 @@ caffe::NetParameter CreateActorNet(int state_size,
                FLAGS_embed_dim, num_tasks);
     ReshapeLayer(np, "reshape_layer", {"embed_task"}, {"reshaped_embed_task"}, boost::none,
                  {32,FLAGS_embed_dim});
+    ReluLayer(np, "embed_relu", {"reshaped_embed_task"}, {"reshaped_embed_task"}, boost::none);
     SilenceLayer(np, "silence", {"dummy1","dummy2"}, {}, boost::none);
     tower_top = Tower(np, "", states_blob_name, {1024, 512, 256});
     IPLayer(np, "encode_layer", {tower_top}, {"tower_embed"}, boost::none, FLAGS_embed_dim);
+    ReluLayer(np, "encode_relu", {"tower_embed"}, {"tower_embed"}, boost::none);
     EltwiseLayer(np, "eltwise_prod_layer", {"reshaped_embed_task","tower_embed"},
                  {"eltwise_top"}, boost::none, caffe::EltwiseParameter::PROD);
+    // TODO: Maybe need another ReLU after Eltwise
     tower_top = "eltwise_top";
   } else { // Ignore the task embedding
     SilenceLayer(np, "silence", {"dummy1","dummy2", task_blob_name}, {}, boost::none);
@@ -603,14 +607,17 @@ caffe::NetParameter CreateCriticNet(int state_size,
                FLAGS_embed_dim, num_tasks);
     ReshapeLayer(np, "reshape_layer", {"embed_task"}, {"reshaped_embed_task"}, boost::none,
                  {32,FLAGS_embed_dim});
+    ReluLayer(np, "embed_relu", {"reshaped_embed_task"}, {"reshaped_embed_task"}, boost::none);
     SilenceLayer(np, "silence", {"dummy1","dummy2","dummy3","dummy4","dummy5"}, {}, boost::none);
     ConcatLayer(np, "concat",
                 {states_blob_name,actions_blob_name,action_params_blob_name},
                 {"state_actions"}, boost::none, 2);
     tower_top = Tower(np, "", "state_actions", {1024, 512, 256});
     IPLayer(np, "encode_layer", {tower_top}, {"tower_embed"}, boost::none, FLAGS_embed_dim);
+    ReluLayer(np, "encode_relu", {"tower_embed"}, {"tower_embed"}, boost::none);
     EltwiseLayer(np, "eltwise_prod_layer", {"reshaped_embed_task","tower_embed"},
                  {"eltwise_top"}, boost::none, caffe::EltwiseParameter::PROD);
+    // TODO: Maybe need another ReLU after Eltwise
     tower_top = "eltwise_top";
   } else { // Ignore the task embedding
     SilenceLayer(np, "silence", {"dummy1","dummy2","dummy3","dummy4","dummy5", task_blob_name},
@@ -988,7 +995,11 @@ void DQN::LabelTransitions(std::vector<Transition>& transitions) {
     Transition& t = transitions[i];
     float reward = std::get<3>(t);
     float target = std::get<4>(transitions[i+1]);
-    std::get<4>(t) = reward + gamma_ * target;
+    float on_pol_target = reward + gamma_ * target;
+    CHECK(std::isfinite(on_pol_target))
+        << "OnPolicyTarget not finite! OnPolTarget=" << on_pol_target
+        << " reward=" << reward << " target=" << target << " i=" << i;
+    std::get<4>(t) = on_pol_target;
   }
 }
 
@@ -1093,6 +1104,7 @@ std::pair<float,float> DQN::SyncUpdateActorCritic(const std::vector<int>& transi
   std::vector<float> on_policy_targets(kMinibatchSize);
   std::vector<bool> terminal(kMinibatchSize);
   std::vector<InputStates> next_states_batch;
+  std::vector<float> next_task_batch;
   next_states_batch.reserve(kMinibatchSize);
   // Raw data used for input to networks
   std::vector<float> states_input(state_input_data_size_, 0.0f);
@@ -1127,12 +1139,13 @@ std::pair<float,float> DQN::SyncUpdateActorCritic(const std::vector<int>& transi
       }
       next_states[kStateInputCount-1] = std::get<5>(transition).get();
       next_states_batch.push_back(next_states);
+      next_task_batch.push_back(float(std::get<1>(transition)));
     }
   }
   // Generate targets using the target nets
   const std::vector<float> target_q_values =
       CriticForwardThroughActor(
-          *critic_target_net_, *actor_target_net_, next_states_batch, task_batch);
+          *critic_target_net_, *actor_target_net_, next_states_batch, next_task_batch);
   int target_value_idx = 0;
   for (int n = 0; n < kMinibatchSize; ++n) {
     float off_policy_target = terminal[n] ? rewards_batch[n] :
@@ -1177,7 +1190,7 @@ std::pair<float,float> DQN::SyncUpdateActorCritic(const std::vector<int>& transi
   float* teammate_comm_acts = exchange_blobs[tid_ == 0 ? 1 : 0];
   std::vector<float> q_values =
       CriticForwardThroughActor(
-          *critic_net_, *actor_net_, next_states_batch, task_batch, teammate_comm_acts);
+          *critic_net_, *actor_net_, next_states_batch, next_task_batch, teammate_comm_acts);
   // Set the critic diff and run backward to get gradients WRT comm_actions
   float* q_values_diff = q_values_blob->mutable_cpu_diff();
   for (int n = 0; n < kMinibatchSize; n++) {
@@ -1306,6 +1319,7 @@ std::pair<float,float> DQN::ApproxSyncUpdateActorCritic(const std::vector<int>& 
   std::vector<float> on_policy_targets(kMinibatchSize);
   std::vector<bool> terminal(kMinibatchSize);
   std::vector<InputStates> next_states_batch;
+  std::vector<float> next_task_batch;
   next_states_batch.reserve(kMinibatchSize);
   // Raw data used for input to networks
   std::vector<float> states_input(state_input_data_size_, 0.0f);
@@ -1340,12 +1354,13 @@ std::pair<float,float> DQN::ApproxSyncUpdateActorCritic(const std::vector<int>& 
       }
       next_states[kStateInputCount-1] = std::get<5>(transition).get();
       next_states_batch.push_back(next_states);
+      next_task_batch.push_back(float(std::get<1>(transition)));
     }
   }
   // Generate targets using the target nets
   const std::vector<float> target_q_values =
       CriticForwardThroughActor(
-          *critic_target_net_, *actor_target_net_, next_states_batch, task_batch);
+          *critic_target_net_, *actor_target_net_, next_states_batch, next_task_batch);
   int target_value_idx = 0;
   for (int n = 0; n < kMinibatchSize; ++n) {
     float off_policy_target = terminal[n] ? rewards_batch[n] :
@@ -1491,7 +1506,9 @@ std::pair<float,float> DQN::UpdateActorCritic(const std::vector<int>& transition
   std::vector<float> on_policy_targets(kMinibatchSize);
   std::vector<bool> terminal(kMinibatchSize);
   std::vector<InputStates> next_states_batch;
+  std::vector<float> next_task_batch;
   next_states_batch.reserve(kMinibatchSize);
+  next_task_batch.reserve(kMinibatchSize);
   // Raw data used for input to networks
   std::vector<float> states_input(state_input_data_size_, 0.0f);
   std::vector<float> action_input(kActionInputDataSize, 0.0f);
@@ -1525,19 +1542,21 @@ std::pair<float,float> DQN::UpdateActorCritic(const std::vector<int>& transition
       }
       next_states[kStateInputCount-1] = std::get<5>(transition).get();
       next_states_batch.push_back(next_states);
+      next_task_batch.push_back(float(std::get<1>(transition)));
     }
   }
   // Generate targets using the target nets
   const std::vector<float> target_q_values =
       CriticForwardThroughActor(
-          *critic_target_net_, *actor_target_net_, next_states_batch, task_batch);
+          *critic_target_net_, *actor_target_net_, next_states_batch, next_task_batch);
   int target_value_idx = 0;
   for (int n = 0; n < kMinibatchSize; ++n) {
     float off_policy_target = terminal[n] ? rewards_batch[n] :
         rewards_batch[n] + gamma_ * target_q_values[target_value_idx++];
     float on_policy_target = on_policy_targets[n];
     float target = FLAGS_beta * on_policy_target + (1 - FLAGS_beta) * off_policy_target;
-    CHECK(std::isfinite(target)) << "Target not finite!";
+    CHECK(std::isfinite(target)) << "Target not finite! OnPolTarget="
+                                 << on_policy_target << " OffPolTarget=" << off_policy_target;
     target_input[target_blob->offset(n,0,0,0)] = target;
   }
   InputDataIntoLayers(
@@ -1955,7 +1974,9 @@ void DQN::LoadReplayMemory(const std::string& filename) {
     in.read((char*)actor_output.data(),
             (kActionSize + kActionParamSize) * sizeof(float));
     in.read((char*)&std::get<3>(t), sizeof(float));
+    CHECK(std::isfinite(std::get<3>(t))) << "Reward not finite!";
     in.read((char*)&std::get<4>(t), sizeof(float));
+    CHECK(std::isfinite(std::get<4>(t))) << "OnPolicyTarget not finite!";
     std::get<5>(t) = boost::none;
     if (i > 0 && !terminal) { // Set the next state for the last transition
       std::get<5>((*replay_memory_)[i-1]) = state;
