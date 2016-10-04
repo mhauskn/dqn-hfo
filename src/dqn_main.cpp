@@ -96,15 +96,6 @@ std::string GetArg(std::string input, int indx) {
   return "";
 }
 
-// Busy sleep while suggesting that other threads run for a small amount of time
-void little_sleep(std::chrono::microseconds us) {
-  auto start = std::chrono::high_resolution_clock::now();
-  auto end = start + us;
-  do {
-    std::this_thread::yield();
-  } while (std::chrono::high_resolution_clock::now() < end);
-}
-
 /**
  * Play one episode and return the total score and number of steps
  */
@@ -123,7 +114,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
   std::deque<dqn::StateDataSp> past_states;
   int steps = 0;
   while (!task.episodeOver()) {
-    const std::vector<float>& current_state = env.getState();
+    const std::vector<float>& current_state = task.getState(tid);
     CHECK_LE(current_state.size(), dqn.state_size());
     dqn::StateDataSp current_state_sp
         = std::make_shared<dqn::StateData>(dqn.state_size());
@@ -154,7 +145,7 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
             << " Action: " << hfo::ActionToString(action.action)
             << " Reward: " << reward;
     if (update) {
-      const std::vector<float>& next_state = env.getState();
+      const std::vector<float>& next_state = task.getState(tid);
       CHECK_LE(next_state.size(), dqn.state_size());
       dqn::StateDataSp next_state_sp
           = std::make_shared<dqn::StateData>(dqn.state_size(), 0);

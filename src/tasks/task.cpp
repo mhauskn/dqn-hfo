@@ -10,6 +10,15 @@ DEFINE_int32(message_size, 1000, "Max size of messages.");
 
 bool FINISHED = false;
 
+// Busy sleep while suggesting that other threads run for a small amount of time
+void little_sleep(std::chrono::microseconds us) {
+  auto start = std::chrono::high_resolution_clock::now();
+  auto end = start + us;
+  do {
+    std::this_thread::yield();
+  } while (std::chrono::high_resolution_clock::now() < end);
+}
+
 void ExecuteCommand(string cmd) {
   CHECK_EQ(system(cmd.c_str()), 0) << "Failed to execute command: " << cmd;
 }
@@ -62,6 +71,11 @@ Task::~Task() {
   for (std::thread& t : threads_) {
     t.join();
   }
+}
+
+const std::vector<float>& Task::getState(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  return envs_[tid].getState();
 }
 
 void Task::act(int tid, action_t action, float arg1, float arg2) {
@@ -733,6 +747,128 @@ float Keepaway::getReward(int tid) {
   status_t s = status_[tid];
   if (status_[tid] == OUT_OF_BOUNDS || status_[tid] == CAPTURED_BY_DEFENSE) {
     reward = -1.;
+  }
+  barrier_.wait();
+  return reward;
+}
+
+BlindSoccer::BlindSoccer(int server_port, int offense_agents, int defense_agents) :
+    Task(taskName(), offense_agents, defense_agents),
+    first_step_(offense_agents + defense_agents, true),
+    old_ball_prox_(offense_agents + defense_agents, 0.),
+    old_kickable_(offense_agents + defense_agents, false),
+    old_ball_dist_goal_(offense_agents + defense_agents, 0.),
+    got_kickable_reward_(offense_agents + defense_agents, false),
+    old_pob_(offense_agents + defense_agents),
+    blind_reward_(2e10)
+{
+  CHECK_EQ(offense_agents, 2) << "BlindSoccer requires 2 agents.";
+  int max_steps = 500;
+  startServer(server_port, offense_agents, 0, defense_agents, 0, true,
+              max_steps);
+  // Connect the agents to the server
+  for (int i=0; i<envs_.size(); ++i) {
+    connectToServer(i);
+    sleep(5);
+  }
+}
+
+const std::vector<float>& BlindSoccer::getState(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  if (tid == 0) { // Blind agent can't see the ball
+    dummy_state_ = envs_[tid].getState();
+    for (int i = 50; i < 58; ++i) { // Features 50-57 are ball features
+      dummy_state_[i] = 0.;
+    }
+    return dummy_state_;
+  } else {
+    return envs_[tid].getState();
+  }
+}
+
+void BlindSoccer::act(int tid, hfo::action_t action, float arg1, float arg2) {
+  CHECK_GT(envs_.size(), tid);
+  if (tid != 0 && action == DASH) { // Sighted agent can't Dash
+    envs_[tid].act(action, 0.f, 0.f);
+  } else {
+    envs_[tid].act(action, arg1, arg2);
+  }
+}
+
+float BlindSoccer::getReward(int tid) {
+  CHECK_GT(envs_.size(), tid);
+  HFOEnvironment& env = envs_[tid];
+
+  const std::vector<float>& current_state = env.getState();
+  Player pob = env.playerOnBall();
+  bool kickable = current_state[12] > 0;
+  float ball_proximity = current_state[53];
+  float ball_dist = 1. - (ball_proximity+1.)/2.;
+  float goal_proximity = current_state[15];
+  float goal_dist = 1. - (goal_proximity+1.)/2.;
+  float ball_dist_goal = getDist(
+      ball_dist, current_state[51], current_state[52],
+      goal_dist, current_state[13], current_state[14]);
+
+  float ball_prox_delta = 0;
+  float kickable_delta = 0;
+  float ball_dist_goal_delta = 0;
+  if (!first_step_[tid]) {
+    ball_prox_delta = ball_proximity - old_ball_prox_[tid];
+    kickable_delta = kickable - old_kickable_[tid];
+    ball_dist_goal_delta = ball_dist_goal - old_ball_dist_goal_[tid];
+  }
+
+  float reward = 0;
+  if (tid == 0) { // Blind agent is rewarded for moving to ball + kicking + scoring
+    if (!episodeOver()) {
+      // Move to ball reward
+      if (pob.unum < 0 || pob.unum == env.getUnum()) {
+        VLOG(1) << "Unum-" << env.getUnum() << " MoveToBallReward: " << ball_prox_delta;
+        reward += ball_prox_delta;
+      }
+      // Kickable reward
+      if (kickable && !old_kickable_[tid] && !got_kickable_reward_[tid]) {
+        VLOG(1) << "Unum-" << env.getUnum() << " KickableReward: 1";
+        reward += 1.0;
+        got_kickable_reward_[tid] = true;
+      }
+      // Kick to goal reward
+      if (pob.unum == env.getUnum()) {
+        VLOG(1) << "Unum-" << env.getUnum() << " KickToGoalReward: " << (3. * -ball_dist_goal_delta);
+        reward -= 3. * ball_dist_goal_delta;
+      }
+    }
+    // Goal Reward
+    if (status_[tid] == GOAL) {
+      if (old_pob_[tid].unum == env.getUnum()) {
+        VLOG(1) << "Unum-" << env.getUnum() << " GoalReward: 5";
+        reward = 5.;
+      } else {
+        VLOG(1) << "Unum-" << env.getUnum() << " TeammateGoalReward: 1";
+        reward = 1.;
+      }
+    }
+    blind_reward_ = reward;
+  } else { // Non-blind agent is rewarded as much as blind agent is
+    while (blind_reward_ >= 2e10) {
+      // Wait for blind agent to get a reward
+      little_sleep(std::chrono::microseconds(100));
+    }
+    reward = blind_reward_;
+    blind_reward_ = 2e10;
+  }
+
+  old_ball_prox_[tid] = ball_proximity;
+  old_kickable_[tid] = kickable;
+  old_ball_dist_goal_[tid] = ball_dist_goal;
+  old_pob_[tid] = pob;
+
+  if (episodeOver()) {
+    first_step_[tid] = true;
+    got_kickable_reward_[tid] = false;
+  } else {
+    first_step_[tid] = false;
   }
   barrier_.wait();
   return reward;

@@ -9,10 +9,14 @@
 #include <gflags/gflags.h>
 #include <boost/thread/barrier.hpp>
 
+void little_sleep(std::chrono::microseconds us);
+
 class Task {
  public:
   Task(std::string task_name, int offense_agents, int defense_agents);
   ~Task();
+
+  virtual const std::vector<float>& getState(int tid);
 
   // Takes an action in the environment
   virtual void act(int tid, hfo::action_t action, float arg1, float arg2);
@@ -283,5 +287,55 @@ class Keepaway : public Task {
  protected:
   virtual float getReward(int tid) override;
 };
+
+/**
+ * BlindSoccer is a task for two agents: the blind agent cannot see
+ * the ball and must score goals. The teacher agent can see
+ * everything, but is only rewarded for the blind agent performing the
+ * task. Thus the teacher must communicate to the blind agent to help
+ * it overcome its inability to see the ball.
+ */
+class BlindSoccer : public Task {
+ public:
+  BlindSoccer(int server_port, int offense_agents, int defense_agents);
+  virtual float getMaxExpectedReward() { return 9; }
+  static std::string taskName() { return "blind_soccer"; }
+
+  virtual void act(int tid, hfo::action_t action, float arg1, float arg2) override;
+
+  virtual const std::vector<float>& getState(int tid) override;
+
+ protected:
+  virtual float getReward(int tid) override;
+
+  std::vector<bool> first_step_;
+  std::vector<float> old_ball_prox_;
+  std::vector<bool> old_kickable_;
+  std::vector<float> old_ball_dist_goal_;
+  std::vector<bool> got_kickable_reward_;
+  std::vector<hfo::Player> old_pob_;
+  std::vector<float> dummy_state_;
+  float blind_reward_; // Reward given to the blind agent
+};
+
+class BlindMoveToBall : public Task {
+ public:
+  BlindMoveToBall(int server_port, int offense_agents, int defense_agents,
+                  float ball_x_min=0.0, float ball_x_max=0.8);
+  virtual float getMaxExpectedReward() { return 0.6; }
+  static std::string taskName() { return "blind_move_to_ball"; }
+  virtual void act(int tid, hfo::action_t action, float arg1, float arg2) override;
+  virtual const std::vector<float>& getState(int tid) override;
+
+ protected:
+  virtual float getReward(int tid) override;
+
+  std::vector<float> old_ball_prox_;
+  std::vector<float> ball_prox_delta_;
+  std::vector<bool> first_step_;
+  std::vector<float> dummy_state_;
+  float blind_reward_; // Reward given to the blind agent
+};
+
 
 #endif

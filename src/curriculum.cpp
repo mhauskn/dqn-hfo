@@ -86,6 +86,10 @@ Task& Curriculum::addTask(std::string task_name, int server_port,
     task = new SayMyTid(server_port, offense_agents, defense_agents);
   } else if (task_name.compare(Keepaway::taskName()) == 0) {
     task = new Keepaway(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(BlindSoccer::taskName()) == 0) {
+    task = new BlindSoccer(server_port, offense_agents, defense_agents);
+  } else if (task_name.compare(BlindMoveToBall::taskName()) == 0) {
+    task = new BlindMoveToBall(server_port, offense_agents, defense_agents);
   } else {
     LOG(FATAL) << "Task " << task_name << " is not a recognized task!";
   }
