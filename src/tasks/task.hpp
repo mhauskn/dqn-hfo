@@ -145,11 +145,16 @@ class Soccer1v1 : public Task {
 class Soccer2v1 : public Task {
  public:
   Soccer2v1(int server_port, int offense_agents, int defense_agents);
-  virtual float getMaxExpectedReward() { return 1; }
+  virtual float getMaxExpectedReward() { return 9; }
   static std::string taskName() { return "soccer2v1"; }
 
  protected:
   virtual float getReward(int tid) override;
+  std::vector<bool> first_step_;
+  std::vector<float> old_ball_prox_;
+  std::vector<bool> old_kickable_;
+  std::vector<float> old_ball_dist_goal_;
+  std::vector<bool> got_kickable_reward_;
   std::vector<hfo::Player> old_pob_;
 };
 

@@ -111,9 +111,9 @@ BlindMoveToBall::BlindMoveToBall(int server_port, int offense_agents, int defens
 
 const std::vector<float>& BlindMoveToBall::getState(int tid) {
   CHECK_GT(envs_.size(), tid);
-  if (tid == 0) { // Blind agent can't see the ball
+  if (tid == 0) { // Blind agent can't see anything
     dummy_state_ = envs_[tid].getState();
-    for (int i = 50; i < 58; ++i) { // Features 50-57 are ball features
+    for (int i = 0; i < dummy_state_.size(); ++i) {
       dummy_state_[i] = 0.;
     }
     return dummy_state_;
@@ -124,11 +124,14 @@ const std::vector<float>& BlindMoveToBall::getState(int tid) {
 
 void BlindMoveToBall::act(int tid, hfo::action_t action, float arg1, float arg2) {
   CHECK_GT(envs_.size(), tid);
-  if (tid != 0 && action == DASH) { // Sighted agent can't Dash
+
+  // Sighted agent can't Dash
+  if (tid == 1 && action == DASH) {
     envs_[tid].act(action, 0.f, 0.f);
-  } else {
-    envs_[tid].act(action, arg1, arg2);
+    return;
   }
+
+  envs_[tid].act(action, arg1, arg2);
 }
 
 float BlindMoveToBall::getReward(int tid) {
@@ -147,7 +150,9 @@ float BlindMoveToBall::getReward(int tid) {
 
   float reward = 0;
   if (tid == 0) { // Blind agent
-    reward = ball_prox_delta;
+    if (!first_step_[tid]) {
+      reward = ball_prox_delta;
+    }
     blind_reward_ = reward;
   } else { // Non-blind agent is rewarded as much as blind agent is
     while (blind_reward_ >= 2e10) {
@@ -164,7 +169,7 @@ float BlindMoveToBall::getReward(int tid) {
     old_ball_prox_[tid] = 0;
     ball_prox_delta_[tid] = 0;
     first_step_[tid] = true;
-    reward = 0;
+    //reward = 0;
   } else {
     first_step_[tid] = false;
   }

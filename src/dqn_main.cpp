@@ -27,12 +27,14 @@ DEFINE_string(critic_weights, "", "The critic pretrained weights load (*.caffemo
 DEFINE_string(actor_snapshot, "", "The actor solver state to load (*.solverstate).");
 DEFINE_string(critic_snapshot, "", "The critic solver state to load (*.solverstate).");
 DEFINE_string(memory_snapshot, "", "The replay memory to load (*.replaymemory).");
+DEFINE_string(semantic_weights, "", "The semantic pretrained weights load (*.caffemodel).");
 // Solver Args
 DEFINE_string(solver, "Adam", "Solver Type.");
 DEFINE_double(momentum, .95, "Solver momentum.");
 DEFINE_double(momentum2, .999, "Solver momentum2.");
 DEFINE_double(actor_lr, .00001, "Solver learning rate.");
 DEFINE_double(critic_lr, .001, "Solver learning rate.");
+DEFINE_double(semantic_lr, .00001, "Semantic Net learning rate.");
 DEFINE_double(clip_grad, 10, "Clip gradients.");
 DEFINE_string(lr_policy, "fixed", "LR Policy.");
 DEFINE_int32(max_iter, 10000000, "Custom max iter.");
@@ -58,11 +60,13 @@ DEFINE_int32(defense_npcs, 0, "Number of npcs playing defense");
 DEFINE_int32(offense_dummies, 0, "Number of dummy npcs playing offense");
 DEFINE_int32(defense_dummies, 0, "Number of dummy npcs playing defense");
 DEFINE_int32(defense_chasers, 0, "Number of chasers playing defense");
+DEFINE_int32(max_players, 3, "Max number of players (used for state features)");
 DEFINE_string(tasks, "", "Tasks to use.");
 DEFINE_string(curriculum, "random", "Curriculum to use.");
 // Communication
 DEFINE_int32(comm_actions, 0, "Number of continuous actions used for communication.");
 DEFINE_bool(teammate_comm_gradients, false, "Teammate specifies gradients to comm actions");
+DEFINE_int32(semantic_comm_size, 0, "Semantic message size");
 
 // Global Variables Shared Between Threads
 dqn::DQN* DQNS[12]; // Pointers to all DQNs. We will never have >12 players
@@ -73,7 +77,7 @@ std::vector<int> INT_VEC;
 std::vector<float*> FLOAT_VEC;
 
 int NumStateFeatures(int num_players) {
-  return 50 + 8 * (num_players);
+  return 58 + 11 * (num_players - 1);
 }
 
 double CalculateEpsilon(const int iter) {
@@ -108,8 +112,10 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
   int task_id = task.getID();
   VLOG(1) << "Task " << task.getName() << " ID " << task_id;
   HFOEnvironment& env = task.getEnv(tid);
-  env.act(NOOP);
-  task.step(tid);
+  while (task.episodeOver()) {
+    env.act(NOOP);
+    task.step(tid);
+  }
   CHECK(!task.episodeOver()) << "Task " << task.getName() << " episode over!";
   std::deque<dqn::StateDataSp> past_states;
   int steps = 0;
@@ -119,12 +125,16 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn::StateDataSp current_state_sp
         = std::make_shared<dqn::StateData>(dqn.state_size());
     std::copy(current_state.begin(), current_state.end(), current_state_sp->begin());
-    if (FLAGS_comm_actions > 0) {
-      const std::vector<float>& hear_state = dqn.GetHearFeatures(env);
-      CHECK_EQ(hear_state.size(), FLAGS_comm_actions);
-      std::copy(hear_state.begin(), hear_state.end(),
-                current_state_sp->end() - FLAGS_comm_actions);
+    if (FLAGS_comm_actions > 0 || FLAGS_semantic_comm_size > 0) {
+      int message_size = FLAGS_comm_actions > 0 ?
+          FLAGS_comm_actions : FLAGS_semantic_comm_size;
+      std::vector<float> hear_msg(message_size, 0.);
+      dqn.GetHearFeatures(env, hear_msg);
+      std::copy(hear_msg.begin(), hear_msg.end(),
+                current_state_sp->end() - message_size);
     }
+    VLOG(1) << "Agent" << tid << " State = " << dqn::PrintVector(*current_state_sp.get())
+            << "Size = " << current_state_sp.get()->size();
     past_states.push_back(current_state_sp);
     CHECK_GE(past_states.size(), dqn::kStateInputCount);
     while (past_states.size() > dqn::kStateInputCount) {
@@ -133,15 +143,18 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
     dqn::InputStates input_states;
     std::copy(past_states.begin(), past_states.end(), input_states.begin());
     dqn::ActorOutput actor_output = dqn.SelectAction(input_states, task_id, epsilon);
-    VLOG(1) << "Actor_output: " << dqn.PrintActorOutput(actor_output);
     Action action = dqn.GetAction(actor_output);
+    VLOG(1) << "Agent" << tid << " Actor_output: " << dqn.PrintActorOutput(actor_output);
     task.act(tid, action.action, action.arg1, action.arg2);
     if (FLAGS_comm_actions > 0) {
       task.say(tid, dqn.GetSayMsg(actor_output));
+    } else if (FLAGS_semantic_comm_size > 0) {
+      task.say(tid, dqn.GetSemanticMsg(input_states, task_id));
     }
     float reward = task.step(tid).second;
     steps++;
-    VLOG(1) << "q_value: " << dqn.EvaluateAction(input_states, task_id, actor_output)
+    VLOG(1) << "Agent" << tid << " Step " << steps
+            << " q_value: " << dqn.EvaluateAction(input_states, task_id, actor_output)
             << " Action: " << hfo::ActionToString(action.action)
             << " Reward: " << reward;
     if (update) {
@@ -150,11 +163,13 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
       dqn::StateDataSp next_state_sp
           = std::make_shared<dqn::StateData>(dqn.state_size(), 0);
       std::copy(next_state.begin(), next_state.end(), next_state_sp->begin());
-      if (FLAGS_comm_actions > 0) {
-        const std::vector<float>& hear_state = dqn.GetHearFeatures(env);
-        CHECK_EQ(hear_state.size(), FLAGS_comm_actions);
-        std::copy(hear_state.begin(), hear_state.end(),
-                  next_state_sp->end() - FLAGS_comm_actions);
+      if (FLAGS_comm_actions > 0 || FLAGS_semantic_comm_size > 0) {
+        int message_size = FLAGS_comm_actions > 0 ?
+            FLAGS_comm_actions : FLAGS_semantic_comm_size;
+        std::vector<float> hear_msg(message_size, 0.);
+        dqn.GetHearFeatures(env, hear_msg);
+        std::copy(hear_msg.begin(), hear_msg.end(),
+                  next_state_sp->end() - message_size);
       }
       const auto transition = task.episodeOver() ?
           dqn::Transition(input_states, task_id, actor_output, reward, 0, boost::none) :
@@ -250,22 +265,36 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   // Look for a recent snapshot to resume
   std::string resume_path = GetArg(FLAGS_resume, tid).empty() ?
       save_prefix : GetArg(FLAGS_resume, tid);
-  std::string last_actor_snapshot, last_critic_snapshot, last_memory_snapshot;
-  dqn::FindLatestSnapshot(resume_path, last_actor_snapshot,
-                          last_critic_snapshot, last_memory_snapshot);
-  LOG(INFO) << "Found Resumable(s): [" << resume_path << "] "
-            << last_actor_snapshot << ", " << last_critic_snapshot
-            << ", " << last_memory_snapshot;
+  std::string last_actor_snapshot, last_critic_snapshot, last_semantic_snapshot,
+      last_memory_snapshot;
+  std::string last_actor_weights, last_critic_weights, last_semantic_weights;
+  if (FLAGS_evaluate) { // Look for .caffemodel files for evaluation
+    dqn::FindLatestSnapshot(
+        resume_path, last_actor_weights, last_critic_weights, last_semantic_weights,
+        last_memory_snapshot, false);
+    LOG(INFO) << "Found Resumable(s): [" << resume_path << "] "
+              << last_actor_weights << ", " << last_critic_weights
+              << ", " << last_semantic_weights << ", " << last_memory_snapshot;
+  } else { // Look for .solverstate files for resume
+    dqn::FindLatestSnapshot(
+        resume_path, last_actor_snapshot, last_critic_snapshot, last_semantic_snapshot,
+        last_memory_snapshot, true);
+    LOG(INFO) << "Found Resumable(s): [" << resume_path << "] "
+              << last_actor_snapshot << ", " << last_critic_snapshot
+              << ", " << last_semantic_snapshot << ", " << last_memory_snapshot;
+  }
   CHECK((FLAGS_critic_snapshot.empty() || FLAGS_critic_weights.empty()) &&
         (FLAGS_actor_snapshot.empty() || FLAGS_actor_weights.empty()))
       << "Give a snapshot or weights but not both.";
-  int num_features = NumStateFeatures(3) + FLAGS_comm_actions; // Enough for 2 agents and comm
+  CHECK(!(FLAGS_comm_actions > 0 && FLAGS_semantic_comm_size > 0))
+      << "Cannot use both comm actions and semantic comm at the same time!";
+  int num_features = NumStateFeatures(FLAGS_max_players)
+      + FLAGS_comm_actions + FLAGS_semantic_comm_size; // Enough for 2 agents and comm
   int num_discrete_actions = 3; // Dash, Turn, Kick
   int num_continuous_actions = dqn::kHFOParams + FLAGS_comm_actions;
   int num_tasks = tasks.getTasks().size();
   // Construct the solver
   caffe::SolverParameter actor_solver_param;
-  caffe::SolverParameter critic_solver_param;
   caffe::NetParameter* actor_net_param = actor_solver_param.mutable_net_param();
   std::string actor_net_filename = save_prefix + "_actor.prototxt";
   if (boost::filesystem::is_regular_file(actor_net_filename)) {
@@ -275,6 +304,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
         num_features, num_discrete_actions, num_continuous_actions, num_tasks));
     WriteProtoToTextFile(*actor_net_param, actor_net_filename.c_str());
   }
+  // Construct the critic
+  caffe::SolverParameter critic_solver_param;
   caffe::NetParameter* critic_net_param = critic_solver_param.mutable_net_param();
   std::string critic_net_filename = save_prefix + "_critic.prototxt";
   if (boost::filesystem::is_regular_file(critic_net_filename)) {
@@ -284,6 +315,27 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
         num_features, num_discrete_actions, num_continuous_actions, num_tasks));
     WriteProtoToTextFile(*critic_net_param, critic_net_filename.c_str());
   }
+  // Construct the semantic net
+  caffe::SolverParameter semantic_solver_param;
+  caffe::NetParameter* semantic_net_param = semantic_solver_param.mutable_net_param();
+  std::string semantic_net_filename = save_prefix + "_semantic.prototxt";
+  if (boost::filesystem::is_regular_file(semantic_net_filename)) {
+    caffe::ReadProtoFromTextFileOrDie(semantic_net_filename.c_str(), semantic_net_param);
+  } else {
+    semantic_net_param->CopyFrom(dqn::CreateSemanticNet(
+        num_features, num_discrete_actions, num_continuous_actions, num_tasks,
+        FLAGS_semantic_comm_size));
+    WriteProtoToTextFile(*semantic_net_param, semantic_net_filename.c_str());
+  }
+  semantic_solver_param.set_snapshot_prefix((save_prefix + "_semantic").c_str());
+  semantic_solver_param.set_max_iter(FLAGS_max_iter);
+  semantic_solver_param.set_type(FLAGS_solver);
+  semantic_solver_param.set_base_lr(FLAGS_semantic_lr);
+  semantic_solver_param.set_lr_policy(FLAGS_lr_policy);
+  semantic_solver_param.set_momentum(FLAGS_momentum);
+  semantic_solver_param.set_momentum2(FLAGS_momentum2);
+  semantic_solver_param.set_clip_gradients(FLAGS_clip_grad);
+
   actor_solver_param.set_snapshot_prefix((save_prefix + "_actor").c_str());
   critic_solver_param.set_snapshot_prefix((save_prefix + "_critic").c_str());
   actor_solver_param.set_max_iter(FLAGS_max_iter);
@@ -303,6 +355,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
 
   std::unique_ptr<dqn::DQN> dqn(new dqn::DQN(actor_solver_param,
                                              critic_solver_param,
+                                             semantic_solver_param,
                                              save_prefix, num_features, tid,
                                              num_discrete_actions,
                                              num_continuous_actions));
@@ -315,6 +368,8 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     dqn->RestoreActorSolver(GetArg(FLAGS_actor_snapshot, tid));
   } else if (!GetArg(FLAGS_actor_weights, tid).empty()) {
     dqn->LoadActorWeights(GetArg(FLAGS_actor_weights, tid));
+  } else if (!last_actor_weights.empty()) {
+    dqn->LoadActorWeights(last_actor_weights);
   }
   if (!last_critic_snapshot.empty()) {
     dqn->RestoreCriticSolver(last_critic_snapshot);
@@ -322,11 +377,20 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     dqn->RestoreCriticSolver(GetArg(FLAGS_critic_snapshot, tid));
   } else if (!GetArg(FLAGS_critic_weights, tid).empty()) {
     dqn->LoadCriticWeights(GetArg(FLAGS_critic_weights, 0));
+  } else if (!last_critic_weights.empty()) {
+    dqn->LoadCriticWeights(last_critic_weights);
   }
   if (!last_memory_snapshot.empty()) {
     dqn->LoadReplayMemory(last_memory_snapshot);
   } else if (!GetArg(FLAGS_memory_snapshot, tid).empty()) {
     dqn->LoadReplayMemory(GetArg(FLAGS_memory_snapshot, tid));
+  }
+  if (!last_semantic_snapshot.empty()) {
+    dqn->RestoreSemanticSolver(last_semantic_snapshot);
+  } else if (!GetArg(FLAGS_semantic_weights, tid).empty()) {
+    dqn->LoadSemanticWeights(GetArg(FLAGS_semantic_weights, tid));
+  } else if (!last_semantic_weights.empty()) {
+    dqn->LoadSemanticWeights(last_semantic_weights);
   }
 
   // Wait for all DQNs to connect and be ready
@@ -341,6 +405,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
       }
     }
   }
+  dqn::DQN* other_dqn = DQNS[tid == 0 ? 1 : 0];
   // TID 0 is the Master and will do the sharing
   if (tid == 0) {
     if (FLAGS_share_actor_layers > 0 || FLAGS_share_critic_layers > 0) {
@@ -360,7 +425,6 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
       }
     }
   }
-
   if (FLAGS_evaluate) {
     Evaluate(*dqn, tid, tasks);
     return;
@@ -390,8 +454,17 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
               << ", task = " << task.getName()
               << ", id = " << task.getID();
     int steps = std::get<1>(result);
-    int n_updates = int(steps * FLAGS_update_ratio);
+    BAR->wait();
     if (FLAGS_share_replay_memory) { MTX.lock(); }
+    if (FLAGS_semantic_comm_size > 0 && tid == 1) { // Only Tid1 Updates
+      float perf = std::get<0>(result) / task.getMaxExpectedReward();
+      perf = std::max(0.f, std::min(1.f, perf));
+      int n_semantic_updates = int(steps * FLAGS_update_ratio);
+      for (int i=0; i<n_semantic_updates; ++i) {
+        dqn->UpdateSemanticNet(other_dqn->getMemory());
+      }
+    }
+    int n_updates = int(steps * FLAGS_update_ratio);
     for (int i=0; i<n_updates; ++i) {
       if (FLAGS_teammate_comm_gradients) {
         dqn->SynchronizedUpdate(*BAR, INT_VEC, FLOAT_VEC);

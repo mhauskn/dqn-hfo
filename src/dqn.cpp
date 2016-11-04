@@ -47,7 +47,9 @@ void HasBlobSize(caffe::Net<Dtype>& net,
       << " dimensions. Expected " << expected_shape.size();
   CHECK(std::equal(blob_shape.begin(), blob_shape.end(),
                    expected_shape.begin()))
-      << "Blob \"" << blob_name << "\" failed dimension check.";
+      << "Blob \"" << blob_name << "\" failed dimension check: "
+      << " ExpectedShape: " << PrintVector(expected_shape)
+      << " ActualShape: " << PrintVector(blob_shape);
 }
 
 // Returns the index of the layer matching the given layer_name or -1
@@ -127,20 +129,29 @@ int FindGreatestIter(const std::string& regexp) {
 void FindLatestSnapshot(const std::string& snapshot_prefix,
                         std::string& actor_snapshot,
                         std::string& critic_snapshot,
-                        std::string& memory_snapshot) {
-  std::string actor_regexp(snapshot_prefix + "_actor_iter_[0-9]+\\.solverstate");
-  std::string critic_regexp(snapshot_prefix + "_critic_iter_[0-9]+\\.solverstate");
+                        std::string& semantic_snapshot,
+                        std::string& memory_snapshot,
+                        bool load_solver) {
+  std::string extension = load_solver ? ".solverstate" : ".caffemodel";
+  std::string actor_regexp(snapshot_prefix + "_actor_iter_[0-9]+\\" + extension);
+  std::string critic_regexp(snapshot_prefix + "_critic_iter_[0-9]+\\" + extension);
+  std::string semantic_regexp(snapshot_prefix + "_semantic_iter_[0-9]+\\" + extension);
   std::string memory_regexp(snapshot_prefix + "_iter_[0-9]+\\.replaymemory");
   int actor_max_iter = FindGreatestIter(actor_regexp);
   int critic_max_iter = FindGreatestIter(critic_regexp);
+  int semantic_max_iter = FindGreatestIter(semantic_regexp);
   int memory_max_iter = FindGreatestIter(memory_regexp);
   if (actor_max_iter > 0) {
     actor_snapshot = snapshot_prefix + "_actor_iter_"
-        + std::to_string(actor_max_iter) + ".solverstate";
+        + std::to_string(actor_max_iter) + extension;
   }
   if (critic_max_iter > 0) {
     critic_snapshot = snapshot_prefix + "_critic_iter_"
-        + std::to_string(critic_max_iter) + ".solverstate";
+        + std::to_string(critic_max_iter) + extension;
+  }
+  if (semantic_max_iter > 0) {
+    semantic_snapshot = snapshot_prefix + "_semantic_iter_"
+        + std::to_string(semantic_max_iter) + extension;
   }
   if (memory_max_iter > 0) {
     memory_snapshot = snapshot_prefix + "_iter_"
@@ -220,21 +231,20 @@ Action DQN::GetAction(const ActorOutput& actor_output) {
   return action;
 }
 
-std::vector<float> DQN::GetHearFeatures(HFOEnvironment& env) {
-  int num_comm_actions = kActionParamSize - kHFOParams;
-  std::vector<float> vect(num_comm_actions, 0.);
+void DQN::GetHearFeatures(HFOEnvironment& env,
+                          std::vector<float>& hear_msg) {
   std::string msg = env.hear();
   VLOG(1) << "Agent" << tid_ << " heard " << msg;
   std::stringstream ss(msg);
   float f;
   int i=0;
   while (ss >> f) {
-    vect[i++] = f;
+    hear_msg[i++] = f;
+    CHECK_LE(i, hear_msg.size());
     if (ss.peek() == ' ') {
       ss.ignore();
     }
   }
-  return vect;
 }
 
 std::string DQN::GetSayMsg(const ActorOutput& actor_output) {
@@ -243,6 +253,17 @@ std::string DQN::GetSayMsg(const ActorOutput& actor_output) {
   int num_comm_actions = kActionParamSize - kHFOParams;
   for (int i = 0; i < num_comm_actions; ++i) {
     msg.append(std::to_string(actor_output[kActionSize+kHFOParams+i]) + " ");
+  }
+  VLOG(1) << "Agent" << tid_ << " said " << msg;
+  return msg;
+}
+
+std::string DQN::GetSemanticMsg(const InputStates& last_states,
+                                const float& task_id) {
+  std::string msg;
+  std::vector<float> message = SemanticForward(*semantic_net_, {{last_states}}, {{task_id}});
+  for (int i = 0; i < message.size(); ++i) {
+    msg.append(std::to_string(message[i]) + " ");
   }
   VLOG(1) << "Agent" << tid_ << " said " << msg;
   return msg;
@@ -634,19 +655,58 @@ caffe::NetParameter CreateCriticNet(int state_size,
   return np;
 }
 
+caffe::NetParameter CreateSemanticNet(int state_size,
+                                      int num_discrete_actions,
+                                      int num_continuous_actions,
+                                      int num_tasks,
+                                      int message_size) {
+  caffe::NetParameter np;
+  np.set_name("Semantic");
+  np.set_force_backward(true);
+  MemoryDataLayer(np, state_input_layer_name, {states_blob_name,"dummy1"},
+                  boost::none, {kMinibatchSize, kStateInputCount, state_size, 1});
+  MemoryDataLayer(np, task_input_layer_name, {task_blob_name,"dummy2"},
+                  boost::none, {kMinibatchSize, 1, 1, 1});
+  MemoryDataLayer(np, action_input_layer_name,
+                  {actions_blob_name,"dummy3"},
+                  boost::none, {kMinibatchSize, kStateInputCount, num_discrete_actions, 1});
+  MemoryDataLayer(np, action_params_input_layer_name,
+                  {action_params_blob_name,"dummy4"},
+                  boost::none, {kMinibatchSize, kStateInputCount, num_continuous_actions, 1});
+  MemoryDataLayer(np, target_input_layer_name, {targets_blob_name,"dummy5"},
+                  boost::none, {kMinibatchSize, 1, 1, 1});
+  if (message_size > 0) {
+    // Processing from states --> message
+    std::string msg_tower = Tower(np, "msg_", states_blob_name, {64});
+    IPLayer(np, "message_layer", {msg_tower}, {"message"}, boost::none, message_size);
+    ReshapeLayer(np, "reshape_layer", {"message"}, {"reshaped_message"},
+                 boost::none, {32,1,message_size,1});
+    ConcatLayer(np, "concat", {"reshaped_message", actions_blob_name, action_params_blob_name},
+                {"message_actions"}, boost::none, 2);
+    std::string tower_top = Tower(np, "post_", "message_actions", {256, 128, 64});
+    IPLayer(np, "reward_layer", {tower_top}, {reward_blob_name}, boost::none, 1);
+    EuclideanLossLayer(np, "loss", {reward_blob_name, targets_blob_name},
+                       {loss_blob_name}, boost::none);
+  }
+  return np;
+}
+
 
 DQN::DQN(caffe::SolverParameter& actor_solver_param,
          caffe::SolverParameter& critic_solver_param,
+         caffe::SolverParameter& semantic_solver_param,
          std::string save_path, int state_size, int tid,
          int num_discrete_actions, int num_continuous_actions) :
     actor_solver_param_(actor_solver_param),
     critic_solver_param_(critic_solver_param),
+    semantic_solver_param_(semantic_solver_param),
     replay_memory_capacity_(FLAGS_memory),
     replay_memory_(new std::deque<Transition>),
     gamma_(FLAGS_gamma),
     random_engine(),
     smoothed_critic_loss_(0),
     smoothed_actor_loss_(0),
+    smoothed_semantic_loss_(0),
     last_snapshot_iter_(0),
     save_path_(save_path),
     state_size_(state_size),
@@ -655,8 +715,7 @@ DQN::DQN(caffe::SolverParameter& actor_solver_param,
     kActionParamSize(num_continuous_actions),
     kActionInputDataSize(kMinibatchSize * num_discrete_actions),
     kActionParamsInputDataSize(kMinibatchSize * num_continuous_actions),
-    kTargetInputDataSize(kMinibatchSize * num_discrete_actions),
-    kFilterInputDataSize(kMinibatchSize * num_discrete_actions),
+    kTargetInputDataSize(kMinibatchSize),
     tid_(tid),
     unum_(0) {
   if (FLAGS_seed <= 0) {
@@ -726,6 +785,14 @@ void DQN::LoadCriticWeights(const std::string& critic_weights) {
   CloneNet(critic_net_, critic_target_net_);
 }
 
+void DQN::LoadSemanticWeights(const std::string& semantic_weights) {
+  CHECK(boost::filesystem::is_regular_file(semantic_weights))
+      << "Invalid file: " << semantic_weights;
+  LOG(INFO) << "Semantic weights finetuning from " << semantic_weights;
+  semantic_net_->CopyTrainedLayersFrom(semantic_weights);
+  // CloneNet(semantic_net_, semantic_target_net_);
+}
+
 void DQN::RestoreActorSolver(const std::string& actor_solver) {
   CHECK(boost::filesystem::is_regular_file(actor_solver))
       << "Invalid file: " << actor_solver;
@@ -741,6 +808,15 @@ void DQN::RestoreCriticSolver(const std::string& critic_solver) {
   LOG(INFO) << "Critic solver state resuming from " << critic_solver;
   critic_solver_->Restore(critic_solver.c_str());
   CloneNet(critic_net_, critic_target_net_);
+  last_snapshot_iter_ = max_iter();
+}
+
+void DQN::RestoreSemanticSolver(const std::string& semantic_solver) {
+  CHECK(boost::filesystem::is_regular_file(semantic_solver))
+      << "Invalid file: " << semantic_solver;
+  LOG(INFO) << "Semantic solver state resuming from " << semantic_solver;
+  semantic_solver_->Restore(semantic_solver.c_str());
+  // CloneNet(semantic_net_, semantic_target_net_);
   last_snapshot_iter_ = max_iter();
 }
 
@@ -776,6 +852,7 @@ void DQN::Snapshot(const std::string& snapshot_prefix,
   using namespace boost::filesystem;
   actor_solver_->Snapshot();
   critic_solver_->Snapshot();
+  semantic_solver_->Snapshot();
   int actor_iter = actor_solver_->iter();
   std::string actor_fname = save_path_+"_actor_iter_"+std::to_string(actor_iter);
   CHECK(is_regular_file(actor_fname + ".caffemodel"));
@@ -790,6 +867,13 @@ void DQN::Snapshot(const std::string& snapshot_prefix,
   std::string target_critic_fname = snapshot_prefix+"_critic_iter_"+std::to_string(critic_iter);
   rename(critic_fname + ".caffemodel", target_critic_fname + ".caffemodel");
   rename(critic_fname + ".solverstate", target_critic_fname + ".solverstate");
+  int semantic_iter = semantic_solver_->iter();
+  std::string semantic_fname = save_path_+"_semantic_iter_"+std::to_string(semantic_iter);
+  CHECK(is_regular_file(semantic_fname + ".caffemodel"));
+  CHECK(is_regular_file(semantic_fname + ".solverstate"));
+  std::string target_semantic_fname = snapshot_prefix+"_semantic_iter_"+std::to_string(semantic_iter);
+  rename(semantic_fname + ".caffemodel", target_semantic_fname + ".caffemodel");
+  rename(semantic_fname + ".solverstate", target_semantic_fname + ".solverstate");
   if (snapshot_memory) {
     std::string mem_fname = snapshot_prefix + "_iter_" +
         std::to_string(max_iter()) + ".replaymemory";
@@ -802,6 +886,8 @@ void DQN::Snapshot(const std::string& snapshot_prefix,
                     "\\.(caffemodel|solverstate)", actor_iter - 1);
     RemoveSnapshots(snapshot_prefix + "_critic_iter_[0-9]+"
                     "\\.(caffemodel|solverstate)", critic_iter - 1);
+    RemoveSnapshots(snapshot_prefix + "_semantic_iter_[0-9]+"
+                    "\\.(caffemodel|solverstate)", semantic_iter - 1);
     RemoveSnapshots(snapshot_prefix + "_iter_[0-9]+\\.replaymemory", critic_iter - 1);
   }
   LOG(INFO) << "Snapshotting Finished!";
@@ -811,15 +897,19 @@ void DQN::Initialize() {
 #ifndef NDEBUG
   actor_solver_param_.set_debug_info(true);
   critic_solver_param_.set_debug_info(true);
+  semantic_solver_param_.set_debug_info(true);
 #endif
   // Initialize net and solver
   actor_solver_.reset(caffe::SolverRegistry<float>::CreateSolver(actor_solver_param_));
   critic_solver_.reset(caffe::SolverRegistry<float>::CreateSolver(critic_solver_param_));
+  semantic_solver_.reset(caffe::SolverRegistry<float>::CreateSolver(semantic_solver_param_));
   actor_net_ = actor_solver_->net();
   critic_net_ = critic_solver_->net();
+  semantic_net_ = semantic_solver_->net();
 #ifndef NDEBUG
   actor_net_->set_debug_info(true);
   critic_net_->set_debug_info(true);
+  semantic_net_->set_debug_info(true);
 #endif
   // Check that nets have the necessary layers and blobs
   HasBlobSize(*actor_net_, states_blob_name,
@@ -838,6 +928,16 @@ void DQN::Initialize() {
               {kMinibatchSize, 1, 1, 1});
   HasBlobSize(*critic_net_, q_values_blob_name,
               {kMinibatchSize, 1});
+  HasBlobSize(*semantic_net_, states_blob_name,
+              {kMinibatchSize, kStateInputCount, state_size_, 1});
+  HasBlobSize(*semantic_net_, actions_blob_name,
+              {kMinibatchSize, 1, kActionSize, 1});
+  HasBlobSize(*semantic_net_, action_params_blob_name,
+              {kMinibatchSize, 1, kActionParamSize, 1});
+  HasBlobSize(*semantic_net_, targets_blob_name,
+              {kMinibatchSize, 1, 1, 1});
+  // HasBlobSize(*semantic_net_, reward_blob_name,
+  //             {kMinibatchSize, 1});
   // HasBlobSize(*critic_net_, loss_blob_name, {1});
   CHECK(actor_net_->has_layer(state_input_layer_name));
   CHECK(actor_net_->has_layer(task_input_layer_name));
@@ -849,6 +949,7 @@ void DQN::Initialize() {
   CHECK(critic_net_->has_layer(q_values_layer_name));
   CloneNet(critic_net_, critic_target_net_);
   CloneNet(actor_net_, actor_target_net_);
+  // CloneNet(semantic_net_, semantic_target_net_);
 }
 
 ActorOutput DQN::GetRandomActorOutput() {
@@ -1023,6 +1124,7 @@ void DQN::Update() {
     smoothed_actor_loss_ = 0;
   }
   smoothed_actor_loss_ += avg_q / float(FLAGS_loss_display_iter);
+
   bool critic_needs_snapshot =
       critic_iter() >= last_snapshot_iter_ + FLAGS_snapshot_freq;
   bool actor_needs_snapshot =
@@ -1031,6 +1133,20 @@ void DQN::Update() {
     Snapshot();
     last_snapshot_iter_ = max_iter();
   }
+}
+
+void DQN::UpdateSemanticNet(std::deque<Transition>* other_memory) {
+  if (memory_size() < FLAGS_memory_threshold) {
+    return;
+  }
+  std::vector<int> transitions = SampleTransitionsFromMemory(kMinibatchSize);
+  float semantic_loss = UpdateSemanticNet(transitions, other_memory);
+  if (semantic_iter() % FLAGS_loss_display_iter == 0) {
+    LOG(INFO) << "[Agent" << tid_ << "] Semantic Iteration " << semantic_iter()
+              << ", avg_loss = " << smoothed_semantic_loss_;
+    smoothed_semantic_loss_ = 0;
+  }
+  smoothed_semantic_loss_ += semantic_loss / float(FLAGS_loss_display_iter);
 }
 
 void DQN::SynchronizedUpdate(boost::barrier& barrier,
@@ -1635,6 +1751,75 @@ std::pair<float,float> DQN::UpdateActorCritic(const std::vector<int>& transition
   return std::make_pair(critic_loss, avg_q);
 }
 
+float DQN::UpdateSemanticNet(const std::vector<int>& transitions,
+                             std::deque<Transition>* other_memory) {
+  CHECK_EQ(other_memory->size(), memory_size());
+  CHECK(semantic_net_->has_blob(states_blob_name));
+  CHECK(semantic_net_->has_blob(task_blob_name));
+  CHECK(semantic_net_->has_blob(actions_blob_name));
+  CHECK(semantic_net_->has_blob(action_params_blob_name));
+  CHECK(semantic_net_->has_blob(targets_blob_name));
+  CHECK(semantic_net_->has_blob(reward_blob_name));
+  CHECK(semantic_net_->has_blob(loss_blob_name));
+  const auto states_blob = semantic_net_->blob_by_name(states_blob_name);
+  const auto action_blob = semantic_net_->blob_by_name(actions_blob_name);
+  const auto action_params_blob = semantic_net_->blob_by_name(action_params_blob_name);
+  const auto message_blob = semantic_net_->blob_by_name("message");
+  const auto reward_blob = semantic_net_->blob_by_name(reward_blob_name);
+  const auto loss_blob = semantic_net_->blob_by_name(loss_blob_name);
+  int msg_size = message_blob->count(1);
+  // Raw data used for input to networks
+  std::vector<float> states_input(state_input_data_size_, 0.0f);
+  std::vector<float> task_input(kMinibatchSize, 0.0f);
+  std::vector<float> action_input(kActionInputDataSize, 0.0f);
+  std::vector<float> action_params_input(kActionParamsInputDataSize, 0.0f);
+  std::vector<float> target_input(kTargetInputDataSize, 0.0f);
+  for (int n = 0; n < kMinibatchSize; ++n) {
+    const auto& transition = (*replay_memory_)[transitions[n]];
+    const auto& other_transition = (*other_memory)[transitions[n]];
+    int task_id = std::get<1>(transition);
+    float reward = std::get<3>(transition);
+    float other_reward = std::get<3>(other_transition);
+    // CHECK_EQ(reward, other_reward);
+    for (int c = 0; c < kStateInputCount; ++c) {
+      const auto& state_data = std::get<0>(transition)[c];
+      std::copy(state_data->begin(), state_data->end(),
+                states_input.begin() + states_blob->offset(n,c,0,0));
+    }
+    task_input[n] = float(task_id);
+    target_input[n] = reward;
+    // Get action from the other agent
+    const ActorOutput& actor_output = std::get<2>(other_transition);
+    std::copy(actor_output.begin(), actor_output.begin() + kActionSize,
+              action_input.begin() + action_blob->offset(n,0,0,0));
+    std::copy(actor_output.begin() + kActionSize, actor_output.end(),
+              action_params_input.begin() + action_params_blob->offset(n,0,0,0));
+  }
+  InputDataIntoLayers(
+      *semantic_net_, states_input.data(), task_input.data(), action_input.data(),
+      action_params_input.data(), target_input.data(), NULL);
+  DLOG(INFO) << " [Step] Semantic Net";
+  semantic_solver_->Step(1);
+  float loss = loss_blob->data_at(0,0,0,0);
+  CHECK(std::isfinite(loss)) << "Semantic loss not finite!";
+  if (semantic_iter() % FLAGS_loss_display_iter == 0) {
+    LOG(INFO) << "Agent" << tid_
+              << " states_input[0] = " << PrintVector(states_input.data(), state_size_)
+              << " task_input[0] = " << PrintVector(task_input.data(), 1)
+              << " action_input[0] = " << PrintVector(action_input.data(), kActionSize)
+              << " action_params_input[0] = " << PrintVector(action_params_input.data(),
+                                                             kActionParamSize)
+              << " message[0] = " << PrintVector(message_blob->cpu_data(), msg_size)
+              << " r_actual[0] = " << PrintVector(target_input.data(), 1)
+              << " r_pred[0] = " << reward_blob->data_at(0,0,0,0)
+              << " loss = " << loss;
+  }
+  // if (semantic_iter() % FLAGS_soft_update_freq == 0) {
+  //   SoftUpdateNet(semantic_net_, semantic_target_net_, FLAGS_tau);
+  // }
+  return loss;
+}
+
 std::vector<float> DQN::CriticForwardThroughActor(
     caffe::Net<float>& critic, caffe::Net<float>& actor,
     const std::vector<InputStates>& states_batch,
@@ -1761,6 +1946,48 @@ std::vector<float> DQN::CriticForward(caffe::Net<float>& critic,
     q_values[n] = q_values_blob->data_at(n,0,0,0);
   }
   return q_values;
+}
+
+std::vector<float> DQN::SemanticForward(caffe::Net<float>& semantic,
+                                        const std::vector<InputStates>& states_batch,
+                                        const std::vector<float>& task_batch) {
+  DLOG(INFO) << "  [Forward] " << semantic.name();
+  CHECK(semantic.has_blob(states_blob_name));
+  CHECK(semantic.has_blob(task_blob_name));
+  CHECK(semantic.has_blob(actions_blob_name));
+  CHECK(semantic.has_blob(action_params_blob_name));
+  CHECK(semantic.has_blob(reward_blob_name));
+  CHECK_LE(states_batch.size(), kMinibatchSize);
+  CHECK_LE(states_batch.size(), task_batch.size());
+  const auto states_blob = semantic.blob_by_name(states_blob_name);
+  const auto task_blob = semantic.blob_by_name(task_blob_name);
+  const auto actions_blob = semantic.blob_by_name(actions_blob_name);
+  const auto action_params_blob = semantic.blob_by_name(action_params_blob_name);
+  std::vector<float> states_input(state_input_data_size_, 0.0f);
+  std::vector<float> task_input(kMinibatchSize, 0.0f);
+  std::vector<float> action_input(kActionInputDataSize, 0.0f);
+  std::vector<float> action_params_input(kActionParamsInputDataSize, 0.0f);
+  std::vector<float> target_input(kTargetInputDataSize, 0.0f);
+  std::copy(task_batch.begin(), task_batch.end(), task_input.begin());
+  for (int n = 0; n < states_batch.size(); ++n) {
+    for (int c = 0; c < kStateInputCount; ++c) {
+      const auto& state_data = states_batch[n][c];
+      std::copy(state_data->begin(), state_data->end(),
+                states_input.begin() + states_blob->offset(n,c,0,0));
+    }
+  }
+  InputDataIntoLayers(semantic, states_input.data(), task_input.data(), action_input.data(),
+                      action_params_input.data(), target_input.data(), NULL);
+  semantic.ForwardPrefilled(nullptr);
+  const auto message_blob = semantic.blob_by_name("message");
+  int msg_size = message_blob->count(1);
+  std::vector<float> m(states_batch.size() * msg_size);
+  for (int n = 0; n < states_batch.size(); ++n) {
+    for (int c = 0; c < msg_size; ++c) {
+      m[n*msg_size+c] = message_blob->data_at(n,c,0,0);
+    }
+  }
+  return m;
 }
 
 void DQN::CloneNet(NetSp& net_from, NetSp& net_to) {

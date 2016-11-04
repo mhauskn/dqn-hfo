@@ -56,6 +56,9 @@ grep "Evaluation:" $LOGS | lmj-plot -m '\[Agent0\].*actor_iter = (\d+),.*goal_pe
 # Plot Critic Loss
 grep "Critic Iteration" $LOGS | lmj-plot -m '\[Agent0\] Critic Iteration (\d+), loss = (\S+)' '\[Agent1\] Critic Iteration (\d+), loss = (\S+)' --num-x-ticks 8 --xlabel 'Iteration' --ylabel 'Critic Average Loss' --title $PREFIX -g -T --log y $MARKERS $LEGEND -c Pastel1 -o $SAVE"_loss.png" &
 
+# Plot Semantic Loss
+grep "Semantic Iteration" $LOGS | lmj-plot -m '\[Agent0\] Semantic Iteration (\d+), avg_loss = (\S+)' '\[Agent1\] Semantic Iteration (\d+), avg_loss = (\S+)' --num-x-ticks 8 --xlabel 'Iteration' --ylabel 'Semantic Average Loss' --title $PREFIX -g -T --log y $MARKERS $LEGEND -c Pastel1 -o $SAVE"_semantic_loss.png" &
+
 # Plot avg q_value
 grep "Actor Iteration" $LOGS | lmj-plot -m '\[Agent0\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' '\[Agent1\] Actor Iteration (\d+),.* avg_q_value = (\S+).*' --num-x-ticks 8 --xlabel 'Iteration' --ylabel 'Actor Average Q-Value' --title $PREFIX -g -T --log y $MARKERS $LEGEND -c Pastel2 -o $SAVE"_avgq.png" &
 

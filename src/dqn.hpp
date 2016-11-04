@@ -55,6 +55,7 @@ constexpr auto targets_blob_name       = "target";
 constexpr auto filter_blob_name        = "filter";
 constexpr auto q_values_blob_name      = "q_values";
 constexpr auto loss_blob_name          = "loss";
+constexpr auto reward_blob_name        = "reward";
 
 /**
  * Deep Q-Network
@@ -63,6 +64,7 @@ class DQN {
 public:
   DQN(caffe::SolverParameter& actor_solver_param,
       caffe::SolverParameter& critic_solver_param,
+      caffe::SolverParameter& semantic_solver_param,
       std::string save_path, int state_size, int tid,
       int num_discrete_actions, int num_continuous_actions);
   ~DQN();
@@ -73,8 +75,10 @@ public:
   // Loading methods
   void RestoreActorSolver(const std::string& actor_solver);
   void RestoreCriticSolver(const std::string& critic_solver);
+  void RestoreSemanticSolver(const std::string& semantic_solver);
   void LoadActorWeights(const std::string& actor_model_file);
   void LoadCriticWeights(const std::string& critic_weights);
+  void LoadSemanticWeights(const std::string& semantic_weights);
   void LoadReplayMemory(const std::string& filename);
 
   // Snapshot the model/solver/replay memory. Produces files:
@@ -110,11 +114,15 @@ public:
                        const float& task_id,
                        const ActorOutput& action);
 
-  // Returns the features heard from other players say messages
-  std::vector<float> GetHearFeatures(hfo::HFOEnvironment& env);
+  // Fills hear_msg with other players say messages
+  void GetHearFeatures(hfo::HFOEnvironment& env, std::vector<float>& hear_msg);
 
   // Returns the outgoing message to be said in-game
   std::string GetSayMsg(const ActorOutput& actor_output);
+
+  // Extract a message from the semantic network
+  std::string GetSemanticMsg(const InputStates& last_states,
+                             const float& task_id);
 
   // Add a transition to replay memory
   void AddTransition(const Transition& transition);
@@ -129,6 +137,11 @@ public:
   void SynchronizedUpdate(boost::barrier& barrier,
                           std::vector<int>& transitions,
                           std::vector<float*>& gradients);
+
+  void UpdateSemanticNet(std::deque<Transition>* other_memory);
+
+  // Get access to the replay memory
+  std::deque<Transition>* getMemory() { return replay_memory_.get(); }
 
   // Clear the replay memory
   void ClearReplayMemory() { replay_memory_->clear(); }
@@ -156,6 +169,7 @@ public:
   int max_iter() const { return std::max(actor_iter(), critic_iter()); }
   int critic_iter() const { return critic_solver_->iter(); }
   int actor_iter() const { return actor_solver_->iter(); }
+  int semantic_iter() const { return semantic_solver_->iter(); }
   int state_size() const { return state_size_; }
   const std::string& save_path() const { return save_path_; }
   int unum() const { return unum_; }
@@ -178,6 +192,10 @@ protected:
   std::pair<float, float> ApproxSyncUpdateActorCritic(const std::vector<int>& transitions,
                                                       boost::barrier& barrier,
                                                       std::vector<float*>& gradients);
+
+  // Update the semantic net
+  float UpdateSemanticNet(const std::vector<int>& transitions,
+                          std::deque<Transition>* other_memory);
 
   // Randomly sample the replay memory n-times, returning transition indexes
   std::vector<int> SampleTransitionsFromMemory(int n);
@@ -228,6 +246,10 @@ protected:
                                    float* teammate_comm_actions,
                                    const std::vector<ActorOutput>& action_batch);
 
+  std::vector<float> SemanticForward(caffe::Net<float>& semantic,
+                                     const std::vector<InputStates>& states_batch,
+                                     const std::vector<float>& task_batch);
+
   // Input data into the State/Target/Filter layers of the given
   // net. This must be done before forward is called.
   void InputDataIntoLayers(caffe::Net<float>& net,
@@ -241,6 +263,7 @@ protected:
 protected:
   caffe::SolverParameter actor_solver_param_;
   caffe::SolverParameter critic_solver_param_;
+  caffe::SolverParameter semantic_solver_param_;
   const int replay_memory_capacity_;
   const double gamma_;
   std::shared_ptr<std::deque<Transition> > replay_memory_;
@@ -248,10 +271,13 @@ protected:
   NetSp actor_net_; // The actor network used for continuous action evaluation.
   SolverSp critic_solver_;
   NetSp critic_net_;  // The critic network used for giving q-value of a continuous action;
+  SolverSp semantic_solver_;
+  NetSp semantic_net_;
+  // NetSp semantic_target_net_;
   NetSp critic_target_net_; // Clone of critic net. Used to generate targets.
   NetSp actor_target_net_; // Clone of the actor net. Used to generate targets.
   std::mt19937 random_engine;
-  float smoothed_critic_loss_, smoothed_actor_loss_;
+  float smoothed_critic_loss_, smoothed_actor_loss_, smoothed_semantic_loss_;
   int last_snapshot_iter_;
   std::string save_path_;
 
@@ -263,7 +289,6 @@ protected:
   const int kActionInputDataSize;
   const int kActionParamsInputDataSize;
   const int kTargetInputDataSize;
-  const int kFilterInputDataSize;
 
   int tid_;
   int unum_;
@@ -273,6 +298,9 @@ caffe::NetParameter CreateActorNet(
     int state_size, int num_discrete_actions, int num_continuous_actions, int num_tasks);
 caffe::NetParameter CreateCriticNet(
     int state_size, int num_discrete_actions, int num_continuous_actions, int num_tasks);
+caffe::NetParameter CreateSemanticNet(
+    int state_size, int num_discrete_actions, int num_continuous_actions,
+    int num_tasks, int message_size);
 /**
  * Returns a vector of filenames matching a given regular expression.
  */
@@ -296,7 +324,9 @@ void RemoveSnapshots(const std::string& regexp, int min_iter);
 void FindLatestSnapshot(const std::string& snapshot_prefix,
                         std::string& actor_snapshot,
                         std::string& critic_snapshot,
-                        std::string& memory_snapshot);
+                        std::string& semantic_snapshot,
+                        std::string& memory_snapshot,
+                        bool load_solver);
 
 /**
  * Look for the best HiScore matching the given snapshot prefix
