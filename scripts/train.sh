@@ -11,10 +11,19 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
-JOB="BlindMTB_DIAL_simple_smallmem"
-SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose -memory 1000 -memory_threshold 500`
-monitor $JOB $SAVE $PID
+values="1e3 1e4 1e5 1e6 1e7"
+for v in $values;
+do
+    JOB="Dial_CommGain_$v"
+    SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+    PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose -memory 1000 -memory_threshold 500 -comm_gain $v`
+    monitor $JOB $SAVE $PID
+done
+
+# JOB="BlindMTB_DIAL_simple_smallmem"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose -memory 1000 -memory_threshold 500`
+# monitor $JOB $SAVE $PID
 
 # JOB="BlindMTB_DIAL_BN_CriticChange"
 # SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"

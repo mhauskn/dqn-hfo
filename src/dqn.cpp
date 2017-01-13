@@ -34,6 +34,7 @@ DEFINE_bool(approx_update, false, "Approximate teammate gradient update.");
 DEFINE_int32(embed_dim, 8, "Output Dimension of task embed layer");
 DEFINE_bool(state_embed, false, "Concatenate task-embed with state.");
 DEFINE_bool(weight_embed, false, "Condition network weights on task-embed.");
+DEFINE_double(comm_gain, 1e3, "Gain applied to comm gradients.");
 
 template <typename Dtype>
 void HasBlobSize(caffe::Net<Dtype>& net,
@@ -1979,7 +1980,7 @@ std::pair<float,float> DQN::DialUpdate(const std::vector<int>& transitions,
     for (int h = 0; h < num_comm_actions; ++h) {
       int comm_offset = critic_action_params_blob->offset(n,0,kHFOParams+h,0);
       // param_diff[comm_offset] = norm_gain * other_diff[n*num_comm_actions+h];
-      param_diff[comm_offset] = 1e3 * other_diff[n*num_comm_actions+h];
+      param_diff[comm_offset] = FLAGS_comm_gain * other_diff[n*num_comm_actions+h];
       // batchnorm_diff[n*num_comm_actions+h] = other_diff[n*num_comm_actions+h];
     }
   }
