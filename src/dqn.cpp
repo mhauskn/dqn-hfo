@@ -590,6 +590,8 @@ caffe::NetParameter CreateActorNet(int state_size,
           num_discrete_actions);
   IPLayer(np, "actionpara_layer", {tower_top}, {"action_params"}, boost::none,
           num_continuous_actions);
+  // SliceLayer(np, "action_param_slice", {"action_params"}, {"sliced_params", "comm_actions"}, boost::none, 1, {dqn::kHFOParams});
+  // BatchNormLayer(np, "batchnorm_layer", {"comm_actions"}, {"batchnorm"}, boost::none);
   return np;
 }
 
@@ -1060,6 +1062,8 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
   std::vector<ActorOutput> actor_outputs(states_batch.size());
   const auto actions_blob = actor.blob_by_name(actions_blob_name);
   const auto action_params_blob = actor.blob_by_name(action_params_blob_name);
+  // const auto comm_blob = actor.blob_by_name("batchnorm");
+  int num_comm_actions = kActionParamSize - kHFOParams;
   for (int n = 0; n < states_batch.size(); ++n) {
     ActorOutput actor_output(kActionSize + kActionParamSize, 0.);
     for (int c = 0; c < kActionSize; ++c) {
@@ -1068,6 +1072,9 @@ DQN::SelectActionGreedily(caffe::Net<float>& actor,
     for (int c = 0; c < kActionParamSize; ++c) {
       actor_output[kActionSize + c] = action_params_blob->data_at(n,c,0,0);
     }
+    // for (int h = 0; h < num_comm_actions; ++h) {
+    //   actor_output[kActionSize + kHFOParams + h] = comm_blob->data_at(n,h,0,0);
+    // }
     actor_outputs[n] = actor_output;
   }
   return actor_outputs;
@@ -1162,14 +1169,21 @@ void DQN::SynchronizedUpdate(boost::barrier& barrier,
   }
   barrier.wait();
   std::pair<float,float> res;
-  if (FLAGS_approx_update) {
-    res = ApproxSyncUpdateActorCritic(transitions, barrier, gradients);
-  } else {
-    res = SyncUpdateActorCritic(transitions, barrier, gradients);
-  }
+  res = DialUpdate(transitions, barrier, gradients);
+  // Alternating Update
+  // if (critic_iter() % 2 == 0) {
+  //   res = DialUpdate(transitions, barrier, gradients);
+  // } else {
+  //   res = ApproxSyncUpdateActorCritic(transitions, barrier, gradients);
+  // }
+  // if (FLAGS_approx_update) {
+  //   res = ApproxSyncUpdateActorCritic(transitions, barrier, gradients);
+  // } else {
+  //   res = SyncUpdateActorCritic(transitions, barrier, gradients);
+  // }
   float critic_loss = res.first;
   float avg_q = res.second;
-  if (critic_iter() % FLAGS_loss_display_iter == 0) {
+  if (tid_ == 0 && critic_iter() % FLAGS_loss_display_iter == 0) {
     LOG(INFO) << "[Agent" << tid_ << "] Critic Iteration " << critic_iter()
               << ", loss = " << smoothed_critic_loss_;
     smoothed_critic_loss_ = 0;
@@ -1751,6 +1765,288 @@ std::pair<float,float> DQN::UpdateActorCritic(const std::vector<int>& transition
   return std::make_pair(critic_loss, avg_q);
 }
 
+std::pair<float,float> DQN::DialUpdate(const std::vector<int>& transitions,
+                                       boost::barrier& barrier,
+                                       std::vector<float*>& exchange_blobs) {
+  CHECK_EQ(exchange_blobs.size(), 2);
+  CHECK(critic_net_->has_blob(states_blob_name));
+  CHECK(critic_net_->has_blob(task_blob_name));
+  CHECK(critic_net_->has_blob(actions_blob_name));
+  CHECK(critic_net_->has_blob(action_params_blob_name));
+  CHECK(critic_net_->has_blob(targets_blob_name));
+  CHECK(critic_net_->has_blob(loss_blob_name));
+  const auto actor_states_blob = actor_net_->blob_by_name(states_blob_name);
+  const auto actor_task_blob = actor_net_->blob_by_name(task_blob_name);
+  const auto actor_actions_blob = actor_net_->blob_by_name(actions_blob_name);
+  const auto actor_action_params_blob = actor_net_->
+      blob_by_name(action_params_blob_name);
+  // const auto actor_batchnorm_blob = actor_net_->blob_by_name("batchnorm");
+  const auto critic_states_blob = critic_net_->blob_by_name(states_blob_name);
+  const auto critic_task_blob = critic_net_->blob_by_name(task_blob_name);
+  const auto critic_action_blob = critic_net_->blob_by_name(actions_blob_name);
+  const auto critic_action_params_blob =
+      critic_net_->blob_by_name(action_params_blob_name);
+  const auto target_blob = critic_net_->blob_by_name(targets_blob_name);
+  const auto q_values_blob = critic_net_->blob_by_name(q_values_blob_name);
+  const auto loss_blob = critic_net_->blob_by_name(loss_blob_name);
+  std::vector<InputStates> states_batch(kMinibatchSize);
+  std::vector<float> task_batch(kMinibatchSize);
+  std::vector<ActorOutput> actions_batch(kMinibatchSize);
+  std::vector<float> rewards_batch(kMinibatchSize);
+  std::vector<float> on_policy_targets(kMinibatchSize);
+  std::vector<bool> terminal(kMinibatchSize);
+  std::vector<InputStates> next_states_batch;
+  std::vector<float> next_task_batch;
+  next_states_batch.reserve(kMinibatchSize);
+  // Raw data used for input to networks
+  std::vector<float> states_input(state_input_data_size_, 0.0f);
+  std::vector<float> action_input(kActionInputDataSize, 0.0f);
+  std::vector<float> action_params_input(kActionParamsInputDataSize, 0.0f);
+  std::vector<float> target_input(kTargetInputDataSize, 0.0f);
+  int num_comm_actions = kActionParamSize - kHFOParams;
+
+  ZeroGradParameters(*critic_net_);
+  ZeroGradParameters(*actor_net_);
+
+  // Collect states and next states
+  for (int n = 0; n < kMinibatchSize; ++n) {
+    const auto& transition = (*replay_memory_)[transitions[n]];
+    InputStates last_states;
+    for (int c = 0; c < kStateInputCount; ++c) {
+      const auto& state_data = std::get<0>(transition)[c];
+      std::copy(state_data->begin(), state_data->end(),
+                states_input.begin() + critic_states_blob->offset(n,c,0,0));
+      last_states[c] = state_data;
+    }
+    states_batch[n] = last_states;
+    task_batch[n] = float(std::get<1>(transition));
+    const ActorOutput& actor_output = std::get<2>(transition);
+    std::copy(actor_output.begin(), actor_output.begin() + kActionSize,
+              action_input.begin() + critic_action_blob->offset(n,0,0,0));
+    std::copy(actor_output.begin() + kActionSize, actor_output.end(),
+              action_params_input.begin() + critic_action_params_blob->offset(n,0,0,0));
+    actions_batch[n] = actor_output;
+    const float reward = std::get<3>(transition);
+    on_policy_targets[n] = std::get<4>(transition);
+    rewards_batch[n] = reward;
+    terminal[n] = !std::get<5>(transition);
+    if (!terminal[n]) {
+      InputStates next_states;
+      for (int i = 0; i < kStateInputCount - 1; ++i) {
+        next_states[i] = std::get<0>(transition)[i + 1];
+      }
+      next_states[kStateInputCount-1] = std::get<5>(transition).get();
+      next_states_batch.push_back(next_states);
+      next_task_batch.push_back(float(std::get<1>(transition)));
+    }
+  }
+
+  // DLOG(INFO) << "Agent" << tid_ << "[Before] action_param_input: " << PrintVector(action_params_input);
+  // 1. Generate new messages m = \mu(s)
+  std::vector<ActorOutput> actor_output_batch =
+      SelectActionGreedily(*actor_net_, states_batch, task_batch);
+  CHECK_EQ(actor_output_batch.size(), kMinibatchSize);
+  // DLOG(INFO) << "Agent" << tid_ << " actor_output_batch " << PrintActorOutput(actor_output_batch[0]);
+  // Copy new messages to action_params_input
+  for (int n = 0; n < kMinibatchSize; ++n) {
+    const ActorOutput& actor_output = actor_output_batch[n];
+    for (int h = 0; h < num_comm_actions; ++h) {
+      int comm_offset = critic_action_params_blob->offset(n,0,kHFOParams+h,0);
+      action_params_input[comm_offset] = actor_output[kActionSize + kHFOParams + h];
+    }
+  }
+  // Check comm copy is correct
+  // DLOG(INFO) << "Agent" << tid_ << "[After] action_param_input: " << PrintVector(action_params_input);
+
+  // Store comm messages in comm_acts
+  std::vector<float> comm_acts;
+  for (int n = 0; n < kMinibatchSize; ++n) {
+    if (!terminal[n]) {
+      const ActorOutput& actor_output = actor_output_batch[n];
+      for (int h = 0; h < num_comm_actions; ++h) {
+        comm_acts.push_back(actor_output[kActionSize + kHFOParams + h]);
+      }
+    }
+  }
+  CHECK_EQ(comm_acts.size() / num_comm_actions, next_states_batch.size());
+
+  // 2. Exchange comm_acts with teammate
+  exchange_blobs[tid_] = comm_acts.data();
+  barrier.wait();
+  float* teammate_comm_acts = exchange_blobs[tid_ == 0 ? 1 : 0];
+  std::vector<float> comm_diff(kMinibatchSize * num_comm_actions, 0.);
+  float critic_loss = 0.;
+  if (tid_ == 0) { // Only blind agent does TD-update
+    // 3. Forward pass over s' to generate targets
+    std::vector<float> target_q_values =
+        CriticForwardThroughActor(
+            *critic_target_net_, *actor_target_net_, next_states_batch,
+            next_task_batch, teammate_comm_acts);
+    float target_value_idx = 0;
+    for (int n = 0; n < kMinibatchSize; ++n) {
+      float off_policy_target = terminal[n] ? rewards_batch[n] :
+          rewards_batch[n] + gamma_ * target_q_values[target_value_idx++];
+      float on_policy_target = on_policy_targets[n];
+      float target = FLAGS_beta * on_policy_target + (1 - FLAGS_beta) * off_policy_target;
+      CHECK(std::isfinite(target)) << "Target not finite!";
+      target_input[target_blob->offset(n,0,0,0)] = target;
+    }
+    InputDataIntoLayers(
+        *critic_net_, states_input.data(), task_batch.data(), action_input.data(),
+        action_params_input.data(), target_input.data(), NULL);
+
+    // DLOG(INFO) << " [Step] Critic";
+    // 4. Backprop through critic to minimize TD-Error
+    critic_solver_->Step(1);
+    critic_loss = loss_blob->data_at(0,0,0,0);
+    CHECK(std::isfinite(critic_loss)) << "Critic loss not finite!";
+    // critic_net_->ForwardPrefilled(nullptr);
+    // critic_net_->BackwardFrom(GetLayerIndex(*critic_net_, q_values_layer_name));
+
+    // Collect the comm_diff from next_states_batch
+    float* state_diff = critic_states_blob->mutable_cpu_diff();
+    int j = 0;
+    for (int n = 0; n < kMinibatchSize; ++n) {
+      if (!terminal[n]) {
+        for (int h = 0; h < num_comm_actions; ++h) {
+          int comm_indx = state_size_ - num_comm_actions + h;
+          int state_offset = critic_states_blob->offset(j,0,comm_indx,0);
+          CHECK_GT(comm_diff.size(), n*num_comm_actions+h);
+          comm_diff[n*num_comm_actions+h] = state_diff[state_offset];
+        }
+        j++;
+      }
+    }
+    DLOG(INFO) << "Agent" << tid_ << " comm_diff: " << PrintVector(comm_diff);
+  }
+  barrier.wait();
+  // Exchange pointers to comm_diff
+  exchange_blobs[tid_] = comm_diff.data();
+  CHECK_EQ(exchange_blobs.size(), 2);
+  barrier.wait();
+  ZeroGradParameters(*critic_net_);
+  ZeroGradParameters(*actor_net_);
+  // Run forward + backward over states_batch
+  // // TODO: We may not need to do this forward pass if data from original forward persists.
+  // std::vector<ActorOutput> actor_output_batch_2 =
+  //     SelectActionGreedily(*actor_net_, states_batch, task_batch);
+  // // Make sure actor outputs are the same
+  // // LOG(INFO) << "ActorOutputBatch " << n << " " << PrintActorOutput(actor_output_batch_2[0]);
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   if (actor_output_batch[n] != actor_output_batch_2[n]) {
+  //     LOG(FATAL) << "Actor outputs not equal!";
+  //   }
+  // }
+  float avg_q = 0;
+  if (tid_ == 0) {
+    std::vector<float> q_values =
+        CriticForward(*critic_net_, states_batch, task_batch, actor_output_batch);
+    avg_q = std::accumulate(q_values.begin(), q_values.end(), 0.0) /
+        float(q_values.size());
+    // Set the critic diff and run backward
+    float* q_values_diff = q_values_blob->mutable_cpu_diff();
+    for (int n = 0; n < kMinibatchSize; n++) {
+      q_values_diff[q_values_blob->offset(n,0,0,0)] = -1.0;
+    }
+    DLOG(INFO) << " [Backwards] " << critic_net_->name();
+    critic_net_->BackwardFrom(GetLayerIndex(*critic_net_, q_values_layer_name));
+  }
+  std::vector<float> zeroes(critic_action_params_blob->count(), 0.);
+  float* action_diff = critic_action_blob->mutable_cpu_diff();
+  float* param_diff = critic_action_params_blob->mutable_cpu_diff();
+  float* other_diff = exchange_blobs[tid_ == 0 ? 1 : 0];
+  // float* batchnorm_diff = actor_batchnorm_blob->mutable_cpu_diff();
+  // float* actor_params_diff = actor_action_params_blob->mutable_cpu_diff();
+  // Get the norm of the action diff
+  if (tid_ == 1) {
+    action_diff = zeroes.data();
+    param_diff = zeroes.data();
+  }
+  // float action_norm = 0.;
+  // float comm_norm = 0.;
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   for (int i = 0; i < kActionSize; ++i) {
+  //     action_norm += std::abs(action_diff[n*kActionSize+i]);
+  //   }
+  //   for (int h = 0; h < num_comm_actions; ++h) {
+  //     comm_norm += std::abs(other_diff[n*num_comm_actions+h]);
+  //   }
+  // }
+  // float norm_gain = action_norm / (comm_norm + 1e-10);
+  // DLOG(INFO) << "action_norm " << action_norm << " comm_norm " << comm_norm <<  " gain " << norm_gain;
+  // Set the message diffs from the other agent
+  for (int n = 0; n < kMinibatchSize; ++n) {
+    for (int h = 0; h < num_comm_actions; ++h) {
+      int comm_offset = critic_action_params_blob->offset(n,0,kHFOParams+h,0);
+      // param_diff[comm_offset] = norm_gain * other_diff[n*num_comm_actions+h];
+      param_diff[comm_offset] = 1e3 * other_diff[n*num_comm_actions+h];
+      // batchnorm_diff[n*num_comm_actions+h] = other_diff[n*num_comm_actions+h];
+    }
+  }
+  barrier.wait();
+  // DLOG(INFO) << "Agent" << tid_ << " ActorParams0 " << PrintActorOutput(action_diff, actor_params_diff);
+  // actor_net_->BackwardFromTo(GetLayerIndex(*actor_net_, "batchnorm_layer"),
+  //                            GetLayerIndex(*actor_net_, "actionpara_layer"));
+  // actor_params_diff = actor_action_params_blob->mutable_cpu_diff();
+  // DLOG(INFO) << "Agent" << tid_ << " ActorParams1 " << PrintActorOutput(action_diff, actor_params_diff);
+  // Copy comm diff from actor_params_diff into critic's param diff
+  // for (int n = 0; n < kMinibatchSize; ++n) {
+  //   for (int h = 0; h < num_comm_actions; ++h) {
+  //     int comm_offset = critic_action_params_blob->offset(n,0,kHFOParams+h,0);
+  //     param_diff[comm_offset] = actor_params_diff[n*kActionParamSize+kHFOParams+h];
+  //   }
+  // }
+  DLOG(INFO) << "Agent" << tid_ << " Diff " << PrintActorOutput(action_diff, param_diff);
+  for (int n = 0; n < kMinibatchSize; ++n) {
+    for (int h = 0; h < kActionSize; ++h) {
+      int offset = critic_action_blob->offset(n,0,h,0);
+      float diff = action_diff[offset];
+      float output = actor_output_batch[n][h];
+      float min = -1.0; float max = 1.0;
+      if (diff < 0) {
+        diff *= (max - output) / (max - min);
+      } else if (diff > 0) {
+        diff *= (output - min) / (max - min);
+      }
+      action_diff[offset] = diff;
+    }
+    for (int h = 0; h < kActionParamSize; ++h) {
+      int offset = critic_action_params_blob->offset(n,0,h,0);
+      float diff = param_diff[offset];
+      float output = actor_output_batch[n][h+kActionSize];
+      float min, max;
+      if (h == 0 || h == 3) {
+        min = 0; max = 100; // Power parameters
+      } else if (h == 1 || h == 2 || h == 4) {
+        min = -180; max = 180; // Direction parameters
+      } else {
+        min = -1; max = 1; // Communication parameters
+      }
+      if (diff < 0) {
+        diff *= (max - output) / (max - min);
+      } else if (diff > 0) {
+        diff *= (output - min) / (max - min);
+      }
+      param_diff[offset] = diff;
+    }
+  }
+  DLOG(INFO) << "Agent" << tid_ << " Diff2 " << PrintActorOutput(action_diff, param_diff);
+  // Transfer input-level diffs from Critic to Actor
+  actor_actions_blob->ShareDiff(*critic_action_blob);
+  actor_action_params_blob->ShareDiff(*critic_action_params_blob);
+  DLOG(INFO) << " [Backwards] " << actor_net_->name();
+  actor_net_->BackwardFrom(GetLayerIndex(*actor_net_, "actionpara_layer"));
+  actor_solver_->ApplyUpdate();
+  actor_solver_->set_iter(actor_solver_->iter() + 1);
+  // Soft update the target networks
+  if (max_iter() % FLAGS_soft_update_freq == 0) {
+    SoftUpdateNet(critic_net_, critic_target_net_, FLAGS_tau);
+    SoftUpdateNet(actor_net_, actor_target_net_, FLAGS_tau);
+  }
+  return std::make_pair(critic_loss, avg_q);
+}
+
+
 float DQN::UpdateSemanticNet(const std::vector<int>& transitions,
                              std::deque<Transition>* other_memory) {
   CHECK_EQ(other_memory->size(), memory_size());
@@ -1802,21 +2098,6 @@ float DQN::UpdateSemanticNet(const std::vector<int>& transitions,
   semantic_solver_->Step(1);
   float loss = loss_blob->data_at(0,0,0,0);
   CHECK(std::isfinite(loss)) << "Semantic loss not finite!";
-  if (semantic_iter() % FLAGS_loss_display_iter == 0) {
-    LOG(INFO) << "Agent" << tid_
-              << " states_input[0] = " << PrintVector(states_input.data(), state_size_)
-              << " task_input[0] = " << PrintVector(task_input.data(), 1)
-              << " action_input[0] = " << PrintVector(action_input.data(), kActionSize)
-              << " action_params_input[0] = " << PrintVector(action_params_input.data(),
-                                                             kActionParamSize)
-              << " message[0] = " << PrintVector(message_blob->cpu_data(), msg_size)
-              << " r_actual[0] = " << PrintVector(target_input.data(), 1)
-              << " r_pred[0] = " << reward_blob->data_at(0,0,0,0)
-              << " loss = " << loss;
-  }
-  // if (semantic_iter() % FLAGS_soft_update_freq == 0) {
-  //   SoftUpdateNet(semantic_net_, semantic_target_net_, FLAGS_tau);
-  // }
   return loss;
 }
 

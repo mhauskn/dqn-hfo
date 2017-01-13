@@ -193,6 +193,12 @@ protected:
                                                       boost::barrier& barrier,
                                                       std::vector<float*>& gradients);
 
+  // DIAL Update
+  std::pair<float, float> DialUpdate(const std::vector<int>& transitions,
+                                     boost::barrier& barrier,
+                                     std::vector<float*>& gradients);
+
+
   // Update the semantic net
   float UpdateSemanticNet(const std::vector<int>& transitions,
                           std::deque<Transition>* other_memory);

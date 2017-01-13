@@ -11,25 +11,94 @@ function monitor {
     nohup monitor-condor-job --pid=$3 --do="$VIS_CMD" --every=100 --on_exit="$EXIT_CMD" >/dev/null &
 }
 
-JOB="MirrorActions_SemanticNet"
+JOB="BlindMTB_DIAL_simple_smallmem"
 SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions -semantic_comm_size 1`
+PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 10000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose -memory 1000 -memory_threshold 500`
 monitor $JOB $SAVE $PID
 
+# JOB="BlindMTB_DIAL_BN_CriticChange"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="BlindMTB_DIAL_BatchNorm"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="BlindMTB_DIAL_ScaleGrad"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="BlindMTB_DIAL_SeparateCriticUpdate"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="BlindMTB_DIAL_SmallMem"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose -memory 1000 -memory_threshold 500`
+# monitor $JOB $SAVE $PID
+
+# JOB="SayMyTid_RIAL"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks say_my_tid -offense_agents 2 -comm_actions 1 -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="BlindMTB_RIAL"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="BlindSoccer_DIAL"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_soccer -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="SayMyTid_DIAL"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks say_my_tid -offense_agents 2 -comm_actions 1 -teammate_comm_gradients -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="BlindMTB_DIAL"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4 -teammate_comm_gradients -verbose`
+# monitor $JOB $SAVE $PID
+
+# JOB="StateDelay"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks move_to_ball -offense_agents 1`
+# monitor $JOB $SAVE $PID
+
+# values="4 8 16"
+# for v in $values;
+# do
+#     JOB="BlindSoccer_SemanticNet_$v"
+#     SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+#     PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_soccer -offense_agents 2 -semantic_comm_size $v`
+#     monitor $JOB $SAVE $PID
+# done
+
+# JOB="MirrorActions_SemanticNet"
+# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
+# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -offense_agents 2 -tasks mirror_actions -semantic_comm_size 1`
+# monitor $JOB $SAVE $PID
 
 # Commands to extract log
 # grep "Agent1 said" state/test_INFO_* | awk '{print $7" "$8" "$9" "$10}' > comm_data.txt
 # grep "Agent0 Angle:" state/test_* | awk '{print $7}' > comm_angle.txt
 # grep "Agent0 Action:" state/test_* | awk '{print $7}' > comm_labels.txt
+# Generate the soccer video from images
+# ffmpeg -r 5 -i mov2/image-%*.png -f mp4 -c:v libx264 -s 1024x768 -vf "crop=iw/2.5:8.38*ih/10:iw/2:ih/10,transpose=1" -pix_fmt yuv420p BlindMTB_Semantic4_2.mp4
+# Generate the tsne video
+# avconv -r 5 -i tsne_%04d.png -f mp4 -c:v libx264 -s 1024x768 -pix_fmt yuv420p test.mp4
+# Side by side concatenate videos
+# avconv -i BlindMTB_Semantic4_2.mp4 -i test.mp4 -filter_complex '[0:v]pad=iw*2:ih[int];[int][1:v]overlay=W/2:0[vid]' -map [vid] -c:v libx264 -crf 23 -preset veryfast output2.mp4
 
 # JOB="SemanticNet"
 # SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
 # PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks say_my_tid -offense_agents 2 -semantic_comm_size 1`
-# monitor $JOB $SAVE $PID
-
-# JOB="BlindMTB_CommAct4"
-# SAVE="/scratch/cluster/mhauskn/dqn-hfo/$JOB"
-# PID=`cluster --gpu --prefix $SAVE ./bin/dqn -save=$SAVE -max_iter 1000000 -tasks blind_move_to_ball -offense_agents 2 -comm_actions 4`
 # monitor $JOB $SAVE $PID
 
 # values="1 3 5 7"
