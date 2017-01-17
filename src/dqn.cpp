@@ -978,6 +978,22 @@ ActorOutput DQN::GetRandomActorOutput() {
   return actor_output;
 }
 
+void DQN::RandomizeNonCommActions(ActorOutput& actor_output) {
+  for (int i = 0; i < kActionSize; ++i) {
+    actor_output[i] = std::uniform_real_distribution<float>(-1.0,1.0)(random_engine);
+  }
+  actor_output[kActionSize + 0] = // Dash Power
+      std::uniform_real_distribution<float>(-100.0, 100.0)(random_engine);
+  actor_output[kActionSize + 1] = // Dash Angle
+      std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+  actor_output[kActionSize + 2] = // Turn Angle
+      std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+  actor_output[kActionSize + 3] = // Kick Power
+      std::uniform_real_distribution<float>(0.0, 100.0)(random_engine);
+  actor_output[kActionSize + 4] = // Kick Angle
+      std::uniform_real_distribution<float>(-180.0, 180.0)(random_engine);
+}
+
 ActorOutput DQN::SelectAction(const InputStates& last_states,
                               const float& task_id,
                               const double& epsilon) {
@@ -1004,9 +1020,10 @@ DQN::SelectActions(const std::vector<InputStates>& states_batch,
   CHECK_EQ(states_batch.size(), task_batch.size());
   if (std::uniform_real_distribution<double>(0.0, 1.0)(random_engine) < epsilon) {
     // Select randomly
-    std::vector<ActorOutput> actor_outputs(states_batch.size());
+    std::vector<ActorOutput> actor_outputs =
+        SelectActionGreedily(*actor_net_, states_batch, task_batch);
     for (int i = 0; i < actor_outputs.size(); ++i) {
-      actor_outputs[i] = GetRandomActorOutput();
+      RandomizeNonCommActions(actor_outputs[i]);
     }
     return actor_outputs;
   } else {

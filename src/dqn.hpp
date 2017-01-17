@@ -89,6 +89,8 @@ public:
                 bool snapshot_memory=true);
 
   ActorOutput GetRandomActorOutput();
+  // The communication is not randomized
+  void RandomizeNonCommActions(ActorOutput& actor_output);
 
   // Select an action using epsilon-greedy action selection.
   ActorOutput SelectAction(const InputStates& input_states,
