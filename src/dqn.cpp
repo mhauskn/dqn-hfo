@@ -1841,9 +1841,9 @@ std::pair<float,float> DQN::DialUpdate(std::vector<Transition>& episode,
     }
   }
   // 1. Generate new messages m = \mu(s)
-  std::vector<ActorOutput> actor_output_batch =
-      SelectActionGreedily(*actor_net_, states_batch, task_batch);
-  DLOG(INFO) << "Agent" << tid_ << " ActorOutputBatch " << PrintActorOutput(actor_output_batch[0]);
+  // std::vector<ActorOutput> actor_output_batch =
+  //     SelectActionGreedily(*actor_net_, states_batch, task_batch);
+  // DLOG(INFO) << "Agent" << tid_ << " ActorOutputBatch " << PrintActorOutput(actor_output_batch[0]);
   // Check: actor_output message == action_params_input message
   // for (int n = 0; n < kMinibatchSize; ++n) {
   //   const ActorOutput& actor_output = actor_output_batch[n];
@@ -1904,25 +1904,17 @@ std::pair<float,float> DQN::DialUpdate(std::vector<Transition>& episode,
   InputDataIntoLayers(
       *critic_net_, states_input.data(), task_batch.data(), action_input.data(),
       action_params_input.data(), target_input.data(), NULL);
-
-  // 4. Backprop through critic to minimize TD-Error
+  // Backprop through critic to minimize TD-Error
   DLOG(INFO) << " [Step] Critic";
   critic_solver_->Step(1);
   critic_loss = loss_blob->data_at(0,0,0,0);
   CHECK(std::isfinite(critic_loss)) << "Critic loss not finite!";
-
-  // Collect the comm_diff from next_states_batch
+  // Collect the comm_diff from states_blob
   float* state_diff = critic_states_blob->mutable_cpu_diff();
-  int j = 0;
   for (int n = 0; n < kMinibatchSize; ++n) {
-    if (!terminal[n]) {
-      for (int h = 0; h < num_comm_actions; ++h) {
-        int comm_indx = state_size_ - num_comm_actions + h;
-        int state_offset = critic_states_blob->offset(j,0,comm_indx,0);
-        CHECK_GT(comm_diff.size(), n*num_comm_actions+h);
-        comm_diff[n*num_comm_actions+h] = FLAGS_comm_gain * state_diff[state_offset];
-      }
-      j++;
+    for (int h = 0; h < num_comm_actions; ++h) {
+      int state_offset = critic_states_blob->offset(n,0,state_size_-num_comm_actions+h,0);
+      comm_diff[n*num_comm_actions+h] = FLAGS_comm_gain * state_diff[state_offset];
     }
   }
   DLOG(INFO) << "Agent" << tid_ << " comm_diff: " << PrintVector(comm_diff);
@@ -1932,10 +1924,12 @@ std::pair<float,float> DQN::DialUpdate(std::vector<Transition>& episode,
   CHECK_EQ(exchange_blobs.size(), 2);
   barrier.wait();
 
+  // Update the actor
   ZeroGradParameters(*critic_net_);
   ZeroGradParameters(*actor_net_);
-
-  // Update the actors
+  std::vector<ActorOutput> actor_output_batch =
+      SelectActionGreedily(*actor_net_, states_batch, task_batch);
+  DLOG(INFO) << "ActorOutput:  " << PrintActorOutput(actor_output_batch[0]);
   std::vector<float> q_values =
       CriticForward(*critic_net_, states_batch, task_batch, actor_output_batch);
   float avg_q = std::accumulate(q_values.begin(), q_values.end(), 0.0) /
