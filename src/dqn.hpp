@@ -138,7 +138,8 @@ public:
 
   void SynchronizedUpdate(boost::barrier& barrier,
                           std::vector<int>& transitions,
-                          std::vector<float*>& gradients);
+                          std::vector<float*>& gradients,
+                          std::vector<Transition>& episode);
 
   void UpdateSemanticNet(std::deque<Transition>* other_memory);
 
@@ -196,7 +197,7 @@ protected:
                                                       std::vector<float*>& gradients);
 
   // DIAL Update
-  std::pair<float, float> DialUpdate(const std::vector<int>& transitions,
+  std::pair<float, float> DialUpdate(std::vector<Transition>& episode,
                                      boost::barrier& barrier,
                                      std::vector<float*>& gradients);
 

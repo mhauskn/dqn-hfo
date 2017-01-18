@@ -107,8 +107,8 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
                                                 const double epsilon,
                                                 const bool update,
                                                 const int tid,
-                                                Task& task) {
-  std::vector<dqn::Transition> episode;
+                                                Task& task,
+                                                std::vector<dqn::Transition>& episode) {
   int task_id = task.getID();
   VLOG(1) << "Task " << task.getName() << " ID " << task_id;
   HFOEnvironment& env = task.getEnv(tid);
@@ -175,13 +175,10 @@ std::tuple<float, int, status_t> PlayOneEpisode(dqn::DQN& dqn,
           dqn::Transition(input_states, task_id, actor_output, reward, 0, boost::none) :
           dqn::Transition(input_states, task_id, actor_output, reward, 0, next_state_sp);
       episode.push_back(transition);
+      if (episode.size() >= dqn::kMinibatchSize) {
+        dqn.SynchronizedUpdate(*BAR, INT_VEC, FLOAT_VEC, episode);
+      }
     }
-  }
-  if (update) {
-    if (FLAGS_share_replay_memory) { MTX.lock(); }
-    dqn.LabelTransitions(episode);
-    dqn.AddTransitions(episode);
-    if (FLAGS_share_replay_memory) { MTX.unlock(); }
   }
   CHECK(task.episodeOver());
   return std::make_tuple(task.getEpisodeReward(tid),
@@ -211,9 +208,10 @@ float Evaluate(dqn::DQN& dqn, int tid, Task& task) {
   std::vector<double> scores;
   std::vector<int> steps;
   std::vector<int> successful_trial_steps;
+  std::vector<dqn::Transition> episode;
   int goals = 0;
   for (int i = 0; i < FLAGS_repeat_games; ++i) {
-    auto result = PlayOneEpisode(dqn, FLAGS_evaluate_with_epsilon, false, tid, task);
+    auto result = PlayOneEpisode(dqn, FLAGS_evaluate_with_epsilon, false, tid, task, episode);
     double trial_reward = std::get<0>(result);
     int trial_steps = std::get<1>(result);
     status_t trial_status = std::get<2>(result);
@@ -429,8 +427,9 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
     Evaluate(*dqn, tid, tasks);
     return;
   }
+  std::vector<dqn::Transition> transitions;
   if (FLAGS_benchmark) {
-    PlayOneEpisode(*dqn, FLAGS_evaluate_with_epsilon, true, tid, tasks.getTask(tid));
+    PlayOneEpisode(*dqn, FLAGS_evaluate_with_epsilon, true, tid, tasks.getTask(tid), transitions);
     dqn->Benchmark(1000);
     return;
   }
@@ -446,7 +445,7 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
   for (int episode = 0; dqn->max_iter() < FLAGS_max_iter; ++episode) {
     double epsilon = CalculateEpsilon(dqn->max_iter());
     Task& task = tasks.getTask(tid);
-    auto result = PlayOneEpisode(*dqn, epsilon, true, tid, task);
+    auto result = PlayOneEpisode(*dqn, epsilon, true, tid, task, transitions);
     LOG(INFO) << "[Agent" << tid <<"] Episode " << episode
               << ", reward = " << std::get<0>(result)
               << ", steps = " << std::get<1>(result)
@@ -455,24 +454,6 @@ void KeepPlayingGames(int tid, std::string save_prefix, Curriculum& tasks) {
               << ", id = " << task.getID();
     int steps = std::get<1>(result);
     BAR->wait();
-    if (FLAGS_share_replay_memory) { MTX.lock(); }
-    if (FLAGS_semantic_comm_size > 0 && tid == 1) { // Only Tid1 Updates
-      float perf = std::get<0>(result) / task.getMaxExpectedReward();
-      perf = std::max(0.f, std::min(1.f, perf));
-      int n_semantic_updates = int(steps * FLAGS_update_ratio);
-      for (int i=0; i<n_semantic_updates; ++i) {
-        dqn->UpdateSemanticNet(other_dqn->getMemory());
-      }
-    }
-    int n_updates = int(steps * FLAGS_update_ratio);
-    for (int i=0; i<n_updates; ++i) {
-      if (FLAGS_teammate_comm_gradients) {
-        dqn->SynchronizedUpdate(*BAR, INT_VEC, FLOAT_VEC);
-      } else {
-        dqn->Update();
-      }
-    }
-    if (FLAGS_share_replay_memory) { MTX.unlock(); }
     if (dqn->actor_iter() >= last_eval_iter + FLAGS_evaluate_freq) {
       float perf = Evaluate(*dqn, tid, tasks);
       MTX.lock(); // Accumulate Evaluation Scores for all agents
@@ -530,6 +511,7 @@ int main(int argc, char** argv) {
     DQNS[i] = NULL;
   }
   BAR = new boost::barrier(FLAGS_offense_agents + FLAGS_defense_agents);
+  FLOAT_VEC.resize(FLAGS_offense_agents + FLAGS_defense_agents);
   unsigned int seed = std::hash<std::string>()(save_path.native());
   srand(seed);
   Curriculum* tasks = Curriculum::getCurriculum(
