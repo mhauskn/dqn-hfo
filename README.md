@@ -17,13 +17,13 @@ changes:
    }
    int iter() { return iter_; }
 +  void set_iter(int new_iter) { iter_ = new_iter; }
- 
+
    // Invoked at specific points during an iteration
    class Callback {
 @@ -84,7 +85,6 @@ class Solver {
- 
+
    void CheckSnapshotWritePermissions();
- 
+
 - protected:
    // Make and apply the update value for the current iteration.
    virtual void ApplyUpdate() = 0;
@@ -58,18 +58,26 @@ changes:
 ## Errors
 
 ### Cannot find cublas_v2.h:
-```device_alternate.hpp:34:23: fatal error: cublas_v2.h: No such file or directory
+```
+device_alternate.hpp:34:23: fatal error: cublas_v2.h: No such file or directory
  #include <cublas_v2.h>
                        ^
-compilation terminated.```
+compilation terminated.
+```
 
 Solution: Include your Cuda path in the installation:
 
   1. ```locate cublas_v2.h``` -- this should give you the path to your cuda installation
   2. ```export CPLUS_INCLUDE_PATH=/your/cuda/path:$CPLUS_INCLUDE_PATH```
 
-### ```caffe/include/caffe/blob.hpp:9:34: fatal error: caffe/proto/caffe.pb.h: No such file or directory
- #include "caffe/proto/caffe.pb.h"```
+### Cannot find caffe.pb.h:
+```
+caffe/include/caffe/blob.hpp:9:34: fatal error: caffe/proto/caffe.pb.h:
+No such file or directory
+ #include "caffe/proto/caffe.pb.h"
+                                  ^
+compilation terminated.
+```
 
 Solution: Symlink the built proto files.
   1. ```cd your_caffe_dir/include/caffe```

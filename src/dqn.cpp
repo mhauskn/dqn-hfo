@@ -70,7 +70,7 @@ void ZeroGradParameters(caffe::Net<Dtype>& net) {
                          blob->mutable_cpu_diff());
         break;
       case caffe::Caffe::GPU:
-        caffe::caffe_gpu_set(blob->count(), static_cast<Dtype>(0),
+        caffe::caffe_set(blob->count(), static_cast<Dtype>(0),
                              blob->mutable_gpu_diff());
         break;
     }
