@@ -15,7 +15,7 @@
 using namespace boost::filesystem;
 using namespace hfo;
 
-DEFINE_bool(gpu, true, "Use GPU to brew Caffe");
+DEFINE_bool(gpu, false, "Use GPU to brew Caffe");
 DEFINE_bool(benchmark, false, "Benchmark the network and exit");
 DEFINE_bool(learn_offline, false, "Just do updates on a fixed replaymemory.");
 // Load/Save Args
