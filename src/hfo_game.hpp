@@ -12,7 +12,7 @@ struct Action {
 
 const
 inline int NumStateFeatures(int num_players) {
-  return 50 + 8 * (num_players);
+  return 50 + 9 * (num_players);
 }
 
 constexpr auto kPassVelThreshold = -.5;

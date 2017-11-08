@@ -106,9 +106,7 @@ std::tuple<double, int, status_t, double> PlayOneEpisode(HFOEnvironment& hfo,
   CHECK(!game.episode_over) << "Episode should not be over at beginning!";
   std::deque<dqn::StateDataSp> past_states;
   while (!game.episode_over) {
-    std::vector<float> temp_state = hfo.getState();
-    temp_state.pop_back();
-    const std::vector<float>& current_state = temp_state; //hfo.getState();
+    const std::vector<float>& current_state = hfo.getState();
     CHECK_EQ(current_state.size(), dqn.state_size());
     dqn::StateDataSp current_state_sp
         = std::make_shared<dqn::StateData>(dqn.state_size());
@@ -132,10 +130,7 @@ std::tuple<double, int, status_t, double> PlayOneEpisode(HFOEnvironment& hfo,
       game.update(hfo);
       float reward = game.reward();
       if (update) {
-        std::vector<float> temp_state = hfo.getState();
-        temp_state.pop_back();
-
-        const std::vector<float>& next_state = temp_state; //hfo.getState();
+        const std::vector<float>& next_state = hfo.getState();
         CHECK_EQ(next_state.size(), dqn.state_size());
         dqn::StateDataSp next_state_sp
             = std::make_shared<dqn::StateData>(dqn.state_size());
