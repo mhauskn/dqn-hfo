@@ -12,7 +12,7 @@ using namespace hfo;
 
 // Server Connection Options. See printouts from bin/HFO.
 feature_set_t features = HIGH_LEVEL_FEATURE_SET;
-string config_dir = "/u/mhauskn/projects/HFO/bin/teams/base/config/formations-dt";
+string config_dir = "${HFO_ROOT_DIR}/bin/teams/base/config/formations-dt";
 int port = 6000;
 string server_addr = "localhost";
 string team_name = "base_right";

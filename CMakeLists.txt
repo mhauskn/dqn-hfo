@@ -39,15 +39,18 @@ target_link_libraries(dqn ${CAFFE_LIBRARIES})
 target_link_libraries(dqn ${HFO_LIBRARIES})
 set_target_properties(dqn PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 
-add_executable(dummy_teammate ${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/dummy_teammate.cpp)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/dummy_teammate.cxx ${CMAKE_CURRENT_SOURCE_DIR}/build/src/hfo_policies/dummy_teammate.cpp)
+add_executable(dummy_teammate ${CMAKE_CURRENT_SOURCE_DIR}/build/src/hfo_policies/dummy_teammate.cpp)
 set_target_properties(dummy_teammate PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 target_link_libraries(dummy_teammate ${HFO_LIBRARIES})
 
-add_executable(dummy_goalie ${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/dummy_goalie.cpp)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/dummy_goalie.cxx ${CMAKE_CURRENT_SOURCE_DIR}/build/src/hfo_policies/dummy_goalie.cpp)
+add_executable(dummy_goalie ${CMAKE_CURRENT_SOURCE_DIR}/build/src/hfo_policies/dummy_goalie.cpp)
 set_target_properties(dummy_goalie PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 target_link_libraries(dummy_goalie ${HFO_LIBRARIES})
 
-add_executable(chaser ${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/chaser.cpp)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/hfo_policies/chaser.cxx ${CMAKE_CURRENT_SOURCE_DIR}/build/src/hfo_policies/chaser.cpp)
+add_executable(chaser ${CMAKE_CURRENT_SOURCE_DIR}/build/src/hfo_policies/chaser.cpp)
 set_target_properties(chaser PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 target_link_libraries(chaser ${HFO_LIBRARIES})
 
