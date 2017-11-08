@@ -2,7 +2,7 @@ cmake_minimum_required (VERSION 2.8.12)
 project(dqn-hfo)
 
 add_definitions(${Caffe_DEFINITIONS})
-option(CPU_ONLY "Use CPU only for Caffe" ON)
+option(CPU_ONLY "Use CPU only for Caffe" OFF)
 if(CPU_ONLY)
   add_definitions(-DCPU_ONLY)
 endif()
