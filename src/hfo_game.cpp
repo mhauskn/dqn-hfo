@@ -190,7 +190,7 @@ float HFOGameState::reward() {
 float HFOGameState::move_to_ball_reward() {
   float reward = 0;
   if (player_on_ball.unum < 0 || player_on_ball.unum == our_unum) {
-    reward += ball_prox_delta;
+    reward -= ball_prox_delta;
   }
   if (kickable_delta >= 1 && !got_kickable_reward) {
     reward += 1.0;
